@@ -145,16 +145,26 @@ Title-case name only counts if the pictures mention it; ALL-CAPS names still cou
 known false positive), "2024. ..." losing the year, apostrophes stripped from 'Twas, two fenced JSON
 blocks, "ACT ONE"/"PART TWO" chapters, last-piece merge capped at max_words + 2.
 
-## State (2026-10-11 22:15, Kimi session)
+## State (2026-10-11 22:55, end of day)
 
-- Everything above works on this PC. Projects on disk: `smoke-test`, `chapter-test` (rendered),
-  `test-lighthouse` (6-scene example, saved, not rendered: a good first test for Ole).
-- Verified this session (Kimi): `factory.sh doctor` all OK; LTX text-to-video (16 s for 2 s clip);
-  Wan 2.1 text-to-video (120 s for 2 s clip, works but slow); own-voice upload flow
-  (reference WAV uploaded, cloned output verified different from generic voice).
-  First git commit made (repo had no commits before).
-- NOT tested yet: ACE-Step music, Stable Audio sfx (models not downloaded — Ole clicks in the GUI),
-  GUI downloads/pulls, Windows launcher, a full 10-minute render (expect ~1.5-2.5 h on 8 GB).
+- Everything above works on this PC and is pushed to github.com/Kjartansson/Ole-K2-Free-Video
+  (public; settings.json, projects/, exports/, voices/, brand/, logs/ are gitignored).
+- Ole's GUI runs from terminal tab 1 (`./factory.sh restart` loads new server code; app/*.py
+  reload by themselves). ComfyUI runs on its own since 20:33 (not started by the factory).
+- Rendered today: `what-the-fire-keeps` (Ole's screenplay, 3:49, 22 shots, 20 min render; review:
+  SDXL put the hearth fire outside in some shots -> prompt fix added after that render; no caption
+  -> automatic caption added; 309 MB -> 6 Mbit/s cap added). Ole has not re-rendered it yet.
+  Also `alberto` (Ole's, 13 scenes, not rendered), `chapter-test` (branded demo), `smoke-test`,
+  `test-lighthouse`.
+- Branding (watermark URL, banner, end card, logo, caption line) built by Kimi in 3 parts from
+  docs/briefs/branding.md, reviewed + tested by Claude. Ole has not set his brand yet (Settings >
+  Branding, e.g. voomreel.com).
+- Also verified earlier (Kimi session): LTX text-to-video 16 s / 2 s clip; Wan 2.1 120 s / 2 s
+  clip; own-voice upload flow.
+- NOT tested yet: ACE-Step music, Stable Audio sfx (models not downloaded: Ole's click), GUI
+  downloads/pulls, Windows launcher, a full 10-minute render (~1.5-2.5 h on 8 GB).
+- Kimi hit its 5-hour usage limit at ~22:50 (Ole's agent-swarm code review + the branding parts).
+  The test-suite job did not start (no tests/ folder yet).
 
 ## Debugging: how to find an error (agents read this first)
 
@@ -179,7 +189,15 @@ freeing VRAM) and on COMFY_DOWN (after ComfyUI answers again); handled fallbacks
 `ctx.level = warning`. A render is "running" while the pid in its job.json is alive, whoever started it
 (GUI, another GUI, CLI); only one render runs at a time.
 
-## Next steps (when Ole asks)
+## Next steps (2026-10-12)
 
-1. Ole tests the GUI himself (START-HERE.md) and reports what to change.
-2. A real 10-minute render as a soak test (overnight).
+1. Test suite (brief docs/briefs/tests.md, not started): when Kimi's quota has reset, run
+   `./docs/briefs/run_tests_job.sh` (Kimi part 1 then part 2, logs in logs/tests/, stops cleanly if the
+   quota is out again). Then Claude reviews tests/, fixes any real bugs the tests found, commits.
+   From then on: `python3 tests/run_all.py` before every commit.
+2. Ole's agent-swarm code-quality review finished in his own Kimi window; ask Ole for its findings
+   (they were not saved to a file here).
+3. Ole re-renders `what-the-fire-keeps` to see the indoor-fire fix, auto caption and smaller file;
+   optional RealVisXL download (6.9 GB) for more realistic pictures.
+4. Ole sets Settings > Branding (voomreel.com) and renders a branded video.
+5. A real 10-minute render as a soak test (overnight).
