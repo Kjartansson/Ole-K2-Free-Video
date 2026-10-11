@@ -47,11 +47,17 @@ cd ~/comfy/ComfyUI/custom_nodes && git clone https://github.com/ltdrdata/ComfyUI
 cd ~/comfy/ComfyUI && venv/bin/pip install -r custom_nodes/TTS-Audio-Suite/requirements.txt
 ```
 
-Copy the `Ole-K2-Free-Video` folder to the new PC (USB stick, network, or git), then:
+Get the factory:
+
+```bash
+git clone https://github.com/Kjartansson/Ole-K2-Free-Video.git ~/Ole-K2-Free-Video
+```
 
 ```bash
 cd ~/Ole-K2-Free-Video && ./factory.sh doctor
 ```
+
+Later updates: `git -C ~/Ole-K2-Free-Video pull`
 
 ## Windows 10/11
 
@@ -64,7 +70,9 @@ cd ~/Ole-K2-Free-Video && ./factory.sh doctor
    Settings).
 5. **TTS Audio Suite**: start ComfyUI once (`run_nvidia_gpu.bat`), open http://127.0.0.1:8188,
    *Manager > Custom Nodes Manager*, search **TTS Audio Suite**, Install, restart ComfyUI.
-6. Copy the `Ole-K2-Free-Video` folder anywhere and double-click `factory.bat`.
+6. Get the factory: install Git for Windows (`winget install Git.Git`), then in PowerShell
+   `git clone https://github.com/Kjartansson/Ole-K2-Free-Video.git` (or download the ZIP from
+   https://github.com/Kjartansson/Ole-K2-Free-Video). Double-click `factory.bat`.
    Check with `factory.bat doctor` in a terminal.
 
 ## Models (downloaded from the GUI)
