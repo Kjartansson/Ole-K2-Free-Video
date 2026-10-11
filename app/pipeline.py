@@ -193,7 +193,8 @@ def split_line(text, max_words):
         else:
             lines.append(p)
     if len(lines) > 1 and len(lines[-1].split()) < 4 and len(lines[-2].split()) + len(lines[-1].split()) <= max_words + 2:
-        lines[-2] += " " + lines.pop()
+        tail = lines.pop()
+        lines[-1] += " " + tail
     return lines
 
 
@@ -349,6 +350,13 @@ def _render(slug, pdir, work, job, only_scene):
     for sh in shots:
         sh["engine"] = "card" if sh.get("card") else engine_of(sh["scene"])
         sh["seed"] = int(sopt(sh["scene"]).get("seed") or (int(meta.get("seed", 1)) + sh["scene"] * 101)) + sh["part"] * 7919
+    brand_on = o.get("branding", "on") != "off" and not only_scene
+    brand_text = (o.get("brand_text") or "").strip() if brand_on else ""
+    if brand_text and o.get("end_card", True) and shots:
+        shots.append({"id": "send", "scene": n_scenes + 1, "part": 0, "parts": 1, "card": True,
+                      "engine": "card", "endcard": True, "text": brand_text, "visual": "", "voice": "",
+                      "speaker": "", "sound": "", "motion": "", "seconds": 3.0,
+                      "chapter": shots[-1]["chapter"], "seed": 0})
     todo = [sh for sh in shots if not only_scene or sh["scene"] == only_scene]
     n = len(shots)
     crossfade = o.get("transition") == "crossfade" and not only_scene
@@ -533,13 +541,24 @@ def _render(slug, pdir, work, job, only_scene):
     cues = []
     font = media.pick_font(o.get("sub_font", ""))
     chapter_starts = []
+    logo = ""
+    if brand_on and o.get("brand_logo"):
+        lp = os.path.join(config.BRAND_DIR, os.path.basename(o["brand_logo"]))
+        if os.path.exists(lp):
+            logo = lp
+    lw, lh = media.image_size(logo) if logo else (0, 0)
+    logo_w = round(64 * lw / lh) if lh else 0
     for j, sh in enumerate(shots):
         first_of_chapter = sh["chapter"] >= 0 and (j == 0 or shots[j - 1]["chapter"] != sh["chapter"])
         if first_of_chapter and j > 0:
             chapter_starts.append(j)
         if sh["engine"] == "card":
-            cues.append({"kind": "card", "start": sh["start"] + 0.15, "end": sh["start"] + sh["dur"] - 0.1,
-                         "text": sh["text"]})
+            if sh.get("endcard"):
+                cues.append({"kind": "endcard", "start": sh["start"] + 0.1, "end": sh["start"] + sh["dur"],
+                             "text": brand_text, "line": o.get("end_card_line", ""), "logo": bool(logo)})
+            else:
+                cues.append({"kind": "card", "start": sh["start"] + 0.15, "end": sh["start"] + sh["dur"] - 0.1,
+                             "text": sh["text"]})
             continue
         text = sh["text"] or (sc["hook"] if j == 0 else "")
         if text and o.get("onscreen_text", True):
@@ -550,21 +569,48 @@ def _render(slug, pdir, work, job, only_scene):
                          "text": sc["chapters"][sh["chapter"]]["title"]})
         if sh["vd"] and o.get("subtitles", True):
             cues += media.caption_cues(sh["voice"], sh["start"] + LEAD, sh["vd"])
-    ass = media.write_ass(W("subs.ass"), cues, font, media.pick_serif()) if cues else None
+    endcard_sh = next((sh for sh in shots if sh.get("endcard")), None)
+    end_main = endcard_sh["start"] if endcard_sh else total
+    brand = {"color": o.get("brand_color", "#FFB020"), "opacity": float(o.get("brand_opacity", 0.8)),
+             "position": o.get("brand_position", "top-left")}
+    if brand_text and o.get("brand_watermark", True):
+        cue = {"kind": "brand", "start": 0, "end": end_main, "text": brand_text}
+        if logo_w and brand["position"] in ("top-left", "bottom-left"):
+            cue["margin_l"] = 60 + logo_w + 16
+        cues.append(cue)
+    if brand_on and o.get("banner_text"):
+        span = {"end": (max(0.0, end_main - 5), end_main), "always": (0, end_main)} \
+            .get(o.get("banner_when", "start"), (0.3, min(5.3, end_main)))
+        cues.append({"kind": "banner", "start": span[0], "end": span[1], "text": o["banner_text"]})
+    ass = media.write_ass(W("subs.ass"), cues, font, media.pick_serif(), brand=brand) if cues else None
     job.step(1, 4, "Mixing sound")
     voices = [(W(f"{sh['id']}_voice.wav"), sh["start"] + LEAD) for sh in shots if sh["vd"]]
     audio = media.mix(total, voices, sfx_items, music, W("audio.wav"), float(o["music_volume"]))
     job.step(2, 4, f"Encoding {total / 60:.1f} min of video")
+    overlays = []
+    if logo and brand_text and o.get("brand_watermark", True):
+        x, y = {"top-left": ("60", "160"), "top-center": ("(W-w)/2", "90"),
+                "top-right": ("W-w-150", "160"), "bottom-left": ("60", "H-470-h")} \
+            .get(brand["position"], ("60", "160"))
+        overlays.append({"path": logo, "x": x, "y": y, "h": 64, "start": 0, "end": end_main,
+                         "opacity": brand["opacity"]})
+    if logo and endcard_sh:
+        overlays.append({"path": logo, "x": "(W-w)/2", "y": 640, "h": 240, "opacity": 1,
+                         "start": endcard_sh["start"] + 0.2, "end": total})
     final = media.assemble([W(f"{sh['id']}_clip.mp4") for sh in shots], [sh["dur"] for sh in shots],
                            os.path.join(pdir, "final.mp4"), work, audio, ass,
                            transition="crossfade" if crossfade else "cut", overlap=OVERLAP,
-                           chapter_starts=chapter_starts, crf=q["crf"],
+                           chapter_starts=chapter_starts, crf=q["crf"], overlays=overlays,
                            on_step=lambda a, b: job.step(2, 4, f"Crossfading part {a}/{b}"))
     pic = next((sh for sh in shots if sh["engine"] != "card"), shots[0])
     media.cover(W(f"{pic['id']}_clip.mp4"), min(pic["dur"] * 0.6, 2.0), sc["hook"] or sc["title"],
-                os.path.join(pdir, "cover.jpg"), work, font)
+                os.path.join(pdir, "cover.jpg"), work, font,
+                extra_cues=[{"kind": "brand", "start": 0, "end": 5, "text": brand_text}] if brand_text else [],
+                brand=brand)
     if not sc["caption"] and o.get("auto_caption", True):
         _auto_caption(slug, sc, o, hw, job)
+    if brand_on and o.get("caption_add"):
+        sc["caption"] = (sc["caption"] + "\n" + o["caption_add"]).strip()
     caption = (sc["caption"] + "\n\n" + " ".join(sc["hashtags"])).strip()
     with open(os.path.join(pdir, "caption.txt"), "w", encoding="utf-8") as f:
         f.write(caption + "\n")
