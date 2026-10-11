@@ -6,6 +6,7 @@ another PC and it detects that PC's GPU/RAM and tools on first start.
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -147,7 +148,7 @@ def detect_hardware(s=None):
         dev = (st.get("devices") or [{}])[0]
         hw.update(gpu=dev.get("name", ""), vram_gb=round(dev.get("vram_total", 0) / 2**30, 1),
                   ram_gb=round(st.get("system", {}).get("ram_total", 0) / 2**30, 1), source="ComfyUI")
-        hw["gpu"] = hw["gpu"].split(" : ")[0].replace("cuda:0 ", "")
+        hw["gpu"] = hw["gpu"].split(" : ")[0].replace("cuda:0 ", "").replace("xpu:0 ", "")
     except Exception:
         pass
     if not hw["vram_gb"] and shutil.which("nvidia-smi"):
@@ -158,8 +159,38 @@ def detect_hardware(s=None):
             hw.update(gpu=name.strip(), vram_gb=round(float(mem) / 1024, 1), source="nvidia-smi")
         except Exception:
             pass
+    if not hw["gpu"]:
+        hw.update({k: v for k, v in _detect_intel_arc().items() if v})
     if not hw["ram_gb"]:
         hw["ram_gb"] = _local_ram_gb()
+    return hw
+
+
+def _detect_intel_arc():
+    """Intel Arc GPU without ComfyUI running: xpu-smi, else the Windows device list.
+
+    Name only in practice: on Arc laptops VRAM is shared RAM, so the real number
+    comes from ComfyUI /system_stats once it runs, or from the Settings fields.
+    """
+    hw = {"gpu": "", "vram_gb": 0.0, "source": ""}
+    if shutil.which("xpu-smi"):
+        try:
+            out = subprocess.run(["xpu-smi", "discovery"], capture_output=True, text=True, timeout=15).stdout
+            m = re.search(r"Device Name:\s*(.+)", out)
+            if m:
+                hw.update(gpu=m.group(1).strip(), source="xpu-smi")
+        except Exception:
+            pass
+    if not hw["gpu"] and platform.system() == "Windows":
+        try:
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
+                                 capture_output=True, text=True, timeout=20).stdout
+            name = next((l.strip() for l in out.splitlines() if "arc" in l.lower()), "")
+            if name:
+                hw.update(gpu=name, source="windows")
+        except Exception:
+            pass
     return hw
 
 

@@ -9,9 +9,32 @@ programs next to it. Steps for Linux and Windows below. Afterwards run `doctor` 
 | ffmpeg (with libass) | cuts, subtitles, sound mix | ~100 MB |
 | Ollama | the local LLM that writes stories | ~1 GB + models (2-9 GB each) |
 | ComfyUI + TTS Audio Suite | pictures, animation, voices | ~10 GB + models (~25 GB for the basic set) |
-| NVIDIA graphics card, 8 GB+ | speed (6 GB works with draft quality) | |
+| NVIDIA or Intel Arc graphics, 8 GB+ | speed (6 GB works with draft quality) | |
 
 Disk: plan for about **60 GB** free.
+
+## Intel Arc instead of NVIDIA
+
+ComfyUI runs on Intel Arc cards (discrete A/B-series and the Arc graphics built into newer
+Core Ultra laptops, e.g. HP EliteBook X) through PyTorch's XPU backend. Differences from the
+normal install:
+
+- Install the **newest Intel graphics driver** first.
+- ComfyUI is installed **manually** (the ready-made portable package is NVIDIA-only). Follow
+  the Linux steps above on either system, but replace the torch line with the XPU build:
+
+  ```bash
+  venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
+  ```
+
+  On Windows use `venv\Scripts\pip` instead. Start ComfyUI once by hand to check it sees the
+  Arc card; after that the factory starts it by itself.
+- **Arc laptops share RAM as VRAM.** "16 GB VRAM" is shared with the system, so 32 GB RAM is
+  strongly recommended; the story LLM (Ollama) then runs on the CPU while ComfyUI holds the
+  shared memory. Type the VRAM number in *Settings > Hardware* if detection shows 0.
+- Expect renders to be slower than on an NVIDIA card with the same memory, and start with the
+  suggested quality preset. If a voice or music node fails on Arc it falls back to the CPU:
+  that works, just slower. NPU chips (AI Boost etc.) are not used: no video model runs on them.
 
 ## Linux (Ubuntu / Debian)
 

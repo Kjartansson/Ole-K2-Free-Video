@@ -289,7 +289,7 @@ def doctor_text():
         row("Story LLM", bool(ms), ", ".join(m["name"] for m in ms[:6]) or "none", "ollama pull qwen2.5:7b")
     hw = config.hardware(s)
     row("GPU", bool(hw["vram_gb"]), f"{hw['gpu'] or '?'} {hw['vram_gb']} GB VRAM, {hw['ram_gb']} GB RAM",
-        "NVIDIA card + driver recommended")
+        "NVIDIA or Intel Arc GPU recommended (or type the numbers in Settings > Hardware)")
     rec = config.recommended(hw["vram_gb"], hw["ram_gb"])
     w = max(len(r[1]) for r in rows)
     out = [""]

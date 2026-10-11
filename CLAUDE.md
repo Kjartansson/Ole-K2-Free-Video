@@ -95,7 +95,7 @@ instructions, no Docker (GPU passthrough + 20 GB images not worth it for a few P
 | file | role |
 |---|---|
 | `factory.py` (+ `factory.sh`, `factory.bat`) | launcher: starts ComfyUI (if local + down) and Ollama, serves the GUI on 127.0.0.1:8770, opens the browser; `make <file>`, `write "idea"`, `doctor`, `shortcut` |
-| `app/config.py` | `settings.json` (per workstation, gitignored), hardware detect (ComfyUI `/system_stats`, nvidia-smi, /proc/meminfo, Windows/macOS), quality presets, recommendations, fit |
+| `app/config.py` | `settings.json` (per workstation, gitignored), hardware detect (ComfyUI `/system_stats`, nvidia-smi, Intel Arc via xpu-smi / Windows device list, /proc/meminfo, Windows/macOS), quality presets, recommendations, fit |
 | `app/scriptfmt.py` | script format: tolerant parser (markdown, bullets, `Scene 1 (0:00-0:04)`, JSON, `//` comments), formatter, checker, ChatGPT prompt template, character-look injection |
 | `app/llm.py` | Ollama: two-pass story writing (beats text -> JSON schema storyboard), convert, improve, pull, delete, unload; `think:false` for thinking models; scene field is `line` (not `voice`: the model confused it with voice names) |
 | `app/comfy.py` | ComfyUI over HTTP only (upload, queue, `/view` download), so ComfyUI may be on another PC; SDXL, LTX i2v/t2v, Wan 2.1, Chatterbox TTS (+own voice), ACE-Step music, Stable Audio sfx; voice allowlist (no celebrity clones) |
