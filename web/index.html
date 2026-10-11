@@ -182,6 +182,7 @@
           <label>Output file name<input id="rOut" placeholder="empty = date_project-name"></label>
         </div>
         <p class="muted small">The video is saved as <code id="rOutPreview"></code> in the <code>exports</code> folder.</p>
+        <div class="row"><button class="ghost danger small" id="btnDelProject2">Delete project</button></div>
       </div>
       <div class="card">
         <h3>Video options <span class="muted small">(empty = default from Settings)</span></h3>
@@ -226,6 +227,8 @@
             <img id="coverImg" alt="cover">
             <label>Caption for TikTok<textarea id="capText" rows="5"></textarea></label>
             <div class="row"><button id="btnCopyCap">Copy caption</button><button class="ghost" id="btnOpenExports">Open exports folder</button></div>
+            <div class="row"><button class="ghost danger small" id="btnDelVideo" title="Removes the finished video, cover and caption (also from exports/). The project stays.">Delete video</button>
+              <button class="ghost danger small" id="btnDelProject" title="Removes the whole project and its exported videos">Delete project</button></div>
             <p class="muted small" id="exportInfo"></p>
           </div>
         </div>

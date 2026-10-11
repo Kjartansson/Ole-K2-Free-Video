@@ -535,6 +535,28 @@ function watchJob(onDone) {
   };
   tick();
 }
+async function deleteVideo(slug, name) {
+  if (!confirm(`Delete the finished video of "${name}"?\n\nThe video, its cover and caption (also the copy in exports/) go to a .trash folder. The project stays, so you can render it again.`)) return;
+  try {
+    await api(`/api/projects/${slug}/delete_video`, {});
+    toast('Video deleted (moved to .trash)');
+    if (slug === S.slug) { await refreshProject(); drawRender(); }
+    loadProjects(); if ($('#tab-library').classList.contains('on')) loadLibrary();
+  } catch (e) { fail(e); }
+}
+async function deleteProject(slug, name) {
+  if (!confirm(`Delete the whole project "${name}"?\n\nIts script, pictures, clips and exported videos go to .trash folders (projects/.trash, exports/.trash).`)) return;
+  try {
+    await api(`/api/projects/${slug}/trash`, {});
+    toast('Project deleted (moved to .trash)');
+    if (slug === S.slug) { S.slug = ''; S.proj = null; try { localStorage.setItem('k2.slug', ''); } catch (e) {} }
+    S.newScript = false;
+    await loadProjects('');
+    if ($('#tab-library').classList.contains('on')) loadLibrary(); else drawRender();
+  } catch (e) { fail(e); }
+}
+$('#btnDelVideo').onclick = () => S.proj && deleteVideo(S.slug, S.proj.name);
+$('#btnDelProject').onclick = $('#btnDelProject2').onclick = () => S.proj && deleteProject(S.slug, S.proj.name);
 $('#btnCopyCap').onclick = () => copyText($('#capText').value).then(() => toast('Caption copied'));
 const openExports = () => api('/api/open', { what: 'exports' }).catch(fail);
 $('#btnOpenExports').onclick = openExports; $('#btnOpenExports2').onclick = openExports;
@@ -554,6 +576,7 @@ async function loadLibrary() {
         <div class="row">
           <button class="small" data-act="cap">Copy caption</button>
           <button class="small ghost" data-act="open">Open</button>
+          <button class="small ghost danger" data-act="del">Delete</button>
           <label class="check"><input type="checkbox" data-act="posted" ${p.posted ? 'checked' : ''}> posted ${esc(p.posted || '')}</label>
         </div>
       </div></div>`).join('') : '<div class="empty">No finished videos yet.</div>';
@@ -561,6 +584,7 @@ async function loadLibrary() {
     const p = done.find(x => x.slug === c.dataset.slug);
     $('[data-act="cap"]', c).onclick = () => copyText(p.caption).then(() => toast('Caption copied'));
     $('[data-act="open"]', c).onclick = async () => { $('#projSel').value = p.slug; await openProject(p.slug); showTab('render'); };
+    $('[data-act="del"]', c).onclick = () => deleteVideo(p.slug, p.name);
     $('[data-act="posted"]', c).onchange = e => api(`/api/projects/${p.slug}/posted`, { posted: e.target.checked }).then(loadLibrary).catch(fail);
   });
 }

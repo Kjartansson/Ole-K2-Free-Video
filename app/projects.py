@@ -152,11 +152,47 @@ def all_projects():
     return sorted(out, key=lambda p: p.get("rendered") or p.get("created") or "", reverse=True)
 
 
+def _trash_exports(names, stamp):
+    """Move exported files (mp4 + jpg + txt) to exports/.trash/<stamp>/."""
+    moved = []
+    dest = os.path.join(config.EXPORTS_DIR, ".trash", stamp)
+    for name in names or []:
+        base = os.path.splitext(os.path.basename(name))[0]
+        for ext in (".mp4", ".jpg", ".txt"):
+            src = os.path.join(config.EXPORTS_DIR, base + ext)
+            if os.path.isfile(src):
+                os.makedirs(dest, exist_ok=True)
+                shutil.move(src, os.path.join(dest, base + ext))
+                moved.append(base + ext)
+    return moved
+
+
+def trash_video(slug):
+    """Remove the finished video (final.mp4, cover, caption + its copies in exports/) by moving them to
+    .trash folders. The project and its generated parts stay, so rendering again is quick."""
+    stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    m = load_meta(slug)
+    moved = _trash_exports(m.get("exports"), stamp)
+    tdir = path(slug, ".trash", stamp)
+    for name in ("final.mp4", "cover.jpg", "caption.txt"):
+        if os.path.isfile(path(slug, name)):
+            os.makedirs(tdir, exist_ok=True)
+            shutil.move(path(slug, name), os.path.join(tdir, name))
+            moved.append(name)
+    for k in ("rendered", "duration", "posted", "last_quality", "shots"):
+        m.pop(k, None)
+    m["exports"] = []
+    save_meta(slug, m)
+    return moved
+
+
 def trash(slug):
-    """Move to projects/.trash (nothing is deleted for good)."""
+    """Move the project and its exported videos to .trash folders (nothing is deleted for good)."""
+    stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    _trash_exports(load_meta(slug).get("exports"), stamp)
     t = os.path.join(config.PROJECTS_DIR, ".trash")
     os.makedirs(t, exist_ok=True)
-    shutil.move(path(slug), os.path.join(t, f"{slug}-{datetime.datetime.now():%Y%m%d-%H%M%S}"))
+    shutil.move(path(slug), os.path.join(t, f"{slug}-{stamp}"))
 
 
 def scene_files(slug, n):

@@ -423,13 +423,15 @@ def _render(slug, pdir, work, job, only_scene):
     w, h = q["img"]
     for k, sh in enumerate(need_img):
         prompt = _shot_prompt(sc, sh) + " Highly detailed, sharp focus, vertical composition."
+        negative = comfy.NEG_IMAGE + _prompt_fixes(prompt)[1]
         dest = W(f"{sh['id']}_img.png")
-        key = _key(prompt, img_ckpt, sh["seed"], w, h, q["img_steps"])
+        key = _key(prompt, img_ckpt, sh["seed"], w, h, q["img_steps"], negative)
         job.step(k, len(need_img), f"Picture {k + 1}/{len(need_img)} (scene {sh['scene']})")
         job.at(sh, model=img_ckpt)
         if not cache.fresh(dest, key):
             log(f"image {sh['id']}: {prompt[:120]}")
-            _gpu(job, comfy.sdxl_image, prompt, dest, img_ckpt, seed=sh["seed"], width=w, height=h, steps=q["img_steps"])
+            _gpu(job, comfy.sdxl_image, prompt, dest, img_ckpt, seed=sh["seed"], width=w, height=h, steps=q["img_steps"],
+                 negative=negative)
             cache.put(dest, key)
 
     # ---- 3. animation (a shot longer than one clip continues from its own last frame)
@@ -560,6 +562,8 @@ def _render(slug, pdir, work, job, only_scene):
     pic = next((sh for sh in shots if sh["engine"] != "card"), shots[0])
     media.cover(W(f"{pic['id']}_clip.mp4"), min(pic["dur"] * 0.6, 2.0), sc["hook"] or sc["title"],
                 os.path.join(pdir, "cover.jpg"), work, font)
+    if not sc["caption"] and o.get("auto_caption", True):
+        _auto_caption(slug, sc, o, hw, job)
     caption = (sc["caption"] + "\n\n" + " ".join(sc["hashtags"])).strip()
     with open(os.path.join(pdir, "caption.txt"), "w", encoding="utf-8") as f:
         f.write(caption + "\n")
@@ -583,7 +587,61 @@ def _render(slug, pdir, work, job, only_scene):
 
 def _shot_prompt(sc, sh, with_motion=False):
     p = scriptfmt.visual_prompt(sc, sh, with_motion)
-    return f"{sh['frame']}. {p}" if sh.get("frame") else p
+    p = f"{sh['frame']}. {p}" if sh.get("frame") else p
+    return _prompt_fixes(p)[0]
+
+
+_FIRE = re.compile(r"\b(fire|flames?|hearth|fireplace|embers|coals|candle|log)\b", re.I)
+_OUTDOOR_FIRE = re.compile(r"\b(campfire|bonfire|wildfire|forest fire|burning (house|building|car|city)|on fire|"
+                           r"explosion|fire truck)\b", re.I)
+_INDOOR = re.compile(r"\b(hearth|fireplace|room|kitchen|inside|indoors|interior|bedroom|fender|mantel)\b", re.I)
+
+
+def _prompt_fixes(prompt):
+    """Picture models put a hearth fire outside (a burning house, flames in the snow) when the prompt
+    also mentions windows, snow or a farmhouse. Keep such fires indoors unless the script asks otherwise.
+    Returns (prompt, extra negative prompt)."""
+    if not _FIRE.search(prompt) or _OUTDOOR_FIRE.search(prompt):
+        return prompt, ""
+    if _INDOOR.search(prompt) and not re.match(r"\s*interior", prompt, re.I):
+        prompt = "Interior shot, indoors. " + prompt
+    return prompt, ", burning house, house on fire, building on fire, wildfire, fire outdoors, flames in the snow"
+
+
+CAPTION_SCHEMA = {"type": "object", "properties": {"caption": {"type": "string"},
+                                                  "hashtags": {"type": "array", "items": {"type": "string"}}},
+                  "required": ["caption", "hashtags"]}
+
+
+def _auto_caption(slug, sc, o, hw, job):
+    """The script has no CAPTION: the local LLM writes one (+ hashtags) from the title and the narration.
+    Kept in project.json (auto_caption) so the script itself stays as the author wrote it."""
+    meta = projects.load_meta(slug)
+    got = meta.get("auto_caption") or {}
+    if not got.get("caption"):
+        try:
+            job.step(3, 4, "Writing the TikTok caption")
+            comfy.free_vram()
+            model = llm.pick_model(o.get("llm"), hw["vram_gb"])
+            if not model or not llm.alive():
+                return
+            story = " ".join(s["voice"] for s in sc["scenes"] if s["voice"])[:1800] or \
+                " ".join(s["visual"] for s in sc["scenes"])[:1800]
+            raw = llm.chat(model, "You write TikTok captions that make people watch and comment.",
+                           f"Write a TikTok caption (1-2 short sentences, end with a question) and 5-8 hashtags for this "
+                           f"video. Same language as the story.\nTitle: {sc['title']}\nStory: {story}",
+                           schema=CAPTION_SCHEMA, ctx=4096, temperature=0.7)
+            js = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            got = {"caption": str(js.get("caption", "")).strip(),
+                   "hashtags": scriptfmt._hashtags(js.get("hashtags") or [])[:8]}
+            meta["auto_caption"] = got
+            projects.save_meta(slug, meta)
+            log(f"auto caption ({model}): {got['caption'][:80]}")
+        except Exception as e:
+            job.warn("Could not write a caption automatically; add a CAPTION line to the script.", e)
+            return
+    sc["caption"] = got.get("caption", "")
+    sc["hashtags"] = sc["hashtags"] or got.get("hashtags", [])
 
 
 def _preview(slug, sc, shots, todo, work, o, cache, job, q):

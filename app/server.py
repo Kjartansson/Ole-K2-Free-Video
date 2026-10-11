@@ -652,10 +652,14 @@ class Handler(BaseHTTPRequestHandler):
             cancel_render(slug)
             return {"ok": True}
         if action == "trash":
-            if RENDER["slug"] == slug and gpu_busy():
+            if running_render() == slug:
                 raise FactoryError("BUSY", "Cancel the render first")
             projects.trash(slug)
             return {"ok": True}
+        if action == "delete_video":
+            if running_render() == slug:
+                raise FactoryError("BUSY", "Cancel the render first")
+            return {"moved": projects.trash_video(slug)}
         if action == "posted":
             meta = projects.load_meta(slug)
             meta["posted"] = time.strftime("%Y-%m-%d") if self._body().get("posted") else ""
