@@ -1,0 +1,46 @@
+TITLE: The Last Lighthouse
+STYLE: cinematic, 35mm film, stormy blue night, warm lantern light, shallow depth of field
+CHARACTER: Mara = 70-year-old lighthouse keeper, long grey braid, deep wrinkles, yellow raincoat | voice: female_02
+NARRATOR: female_01
+MUSIC: slow dark ambient, low strings, building tension
+CAPTION: She kept the light on for 40 years. Would you have believed her?
+HASHTAGS: #story #shortfilm #mystery #lighthouse #storytime
+HOOK: Nobody believed her.
+
+SCENE 1 | 3s
+VISUAL: a lonely lighthouse on a black cliff in a violent storm at night, huge waves exploding against the rocks, wide shot
+MOTION: slow push in, waves crash, rain blows sideways
+VOICE: For forty years, Mara kept the light on.
+TEXT: Nobody believed her.
+SOUND: wind, waves
+
+SCENE 2 | 4s
+VISUAL: Mara climbs a narrow spiral iron staircase inside the lighthouse holding an old oil lantern, close up from below
+MOTION: tilt up, lantern swings, light flickers on the walls
+VOICE: Every night, the same ship.
+SOUND: footsteps, wind
+
+SCENE 3 | 4s
+VISUAL: through the rain-streaked lighthouse window, a ghostly old sailing ship glowing faintly far out at sea, fog around it
+MOTION: slow push in towards the window, fog drifts
+VOICE: Mara: They are coming back tonight.
+SOUND: rumble
+
+SCENE 4 | 4s
+VISUAL: Mara on the lighthouse balcony in the storm, raincoat whipping in the wind, staring out to sea, medium shot
+MOTION: handheld, hair and coat blowing hard
+VOICE: The town laughed. The ship had sunk in 1984.
+SOUND: wind, thunder
+
+SCENE 5 | 4s
+VISUAL: on the dark beach at dawn, a row of soaked sailors in old uniforms standing silently at the waterline, mist
+MOTION: slow pan right along the line of sailors
+VOICE: At dawn, the fishermen found them on the beach.
+TEXT: 1984
+SOUND: waves, heartbeat
+
+SCENE 6 | 4s
+VISUAL: Mara smiling softly in the lighthouse lantern room as the great lamp turns off at sunrise, golden light on her face, close up
+MOTION: slow pull back, the lamp stops turning
+VOICE: She had finally brought them home.
+SOUND: riser

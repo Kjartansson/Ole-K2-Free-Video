@@ -1,0 +1,12 @@
+settings.json
+settings.json.tmp
+projects/
+exports/
+logs/
+voices/
+music/*
+!music/README.txt
+sfx/*
+!sfx/README.txt
+__pycache__/
+*.pyc

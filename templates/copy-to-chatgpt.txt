@@ -1,0 +1,34 @@
+Write a short vertical video script (TikTok / Reels / Shorts).
+
+MY IDEA: [write your idea here, e.g. "a lighthouse keeper who sees a ghost ship every night"]
+GENRE / TONE: [e.g. mystery, horror, funny, motivational, history facts]
+LENGTH: about 30 seconds, 6-7 scenes.
+
+Reply ONLY with the script in exactly this format. No intro, no notes, no markdown, no **bold**.
+
+TITLE: (short title)
+STYLE: (one visual style used for EVERY shot: medium, lighting, colours, lens, era)
+CHARACTER: Name = (fixed look: age, face, hair, clothes) | voice: female_02
+NARRATOR: female_01
+MUSIC: (mood, instruments, tempo)
+CAPTION: (TikTok description, 1-2 sentences, end with a question)
+HASHTAGS: #tag #tag #tag #tag #tag
+HOOK: (first words on screen, max 6 words)
+
+SCENE 1 | 3s
+VISUAL: (what the camera sees: subject, action, place, light, shot type; 20-40 words)
+MOTION: (one camera move: slow push in / pull back / pan left / pan right / tilt up / handheld / static)
+VOICE: (narration, max 12 words) or Name: (a character's spoken line)
+TEXT: (optional on-screen words, max 6)
+SOUND: (sound effects: wind, rain, waves, thunder, footsteps, heartbeat, clock, whoosh, impact, riser, static, fire, rumble)
+
+SCENE 2 | 4s
+...
+
+Rules:
+- Scene 1 grabs attention within 2 seconds (a question, a shock or a mystery).
+- One clear story with rising tension and a twist or payoff in the last scene.
+- Every VISUAL stands alone: repeat the place and the character's name in each one.
+- Never ask for written words, signs, screens or logos in VISUAL; words go in TEXT.
+- One CHARACTER line per person who appears more than once (or none).
+- Voices available: female_01, female_02, male_01, male_02, en_woman, en_man.

@@ -1,0 +1,105 @@
+// =====================================================================================
+//  VIDEO TEMPLATE: everything the factory needs to make one TikTok video
+// =====================================================================================
+//  Fill in the lines below (or let the local AI or ChatGPT/DeepSeek fill them), then paste
+//  the whole thing into the Story tab, or run:   ./factory.sh make my-story.txt
+//  Lines starting with // are help text and are ignored. Delete them or leave them.
+//
+//  REQUIRED: at least one SCENE with a VISUAL. Everything else is optional and has a default.
+//  A 30-second video is about 6-8 scenes of 3-5 seconds each.
+// -------------------------------------------------------------------------------------
+
+// Short name of the video. Also used for the file name.
+TITLE:
+
+// One look for EVERY shot, so the scenes match. Medium, lighting, colours, lens, era.
+// e.g. cinematic, 35mm film, moody blue night light, shallow depth of field
+STYLE:
+
+// Characters who appear in more than one scene. The look is added to every scene that names
+// them, so they stay the same person. voice = which voice speaks their lines (optional).
+// Voices: female_01 female_02 male_01 male_02 en_woman en_man, or "own" (your recording).
+// One CHARACTER line per person; delete the line if there are none.
+CHARACTER: Name = age, face, hair, clothes | voice: male_01
+
+// Voice for the narration (lines without a character name).
+NARRATOR: female_01
+
+// Background music mood. Used to pick or generate the music.
+// e.g. slow dark ambient / tense pulsing / calm piano / uplifting epic
+MUSIC:
+
+// The TikTok description (copied for you after rendering). End with a question.
+CAPTION:
+
+// 4-8 hashtags.
+HASHTAGS: #story #shortfilm
+
+// First words on screen in scene 1 (max 6 words). Also printed on the cover image.
+HOOK:
+
+// ---- LONG VIDEOS (optional) ------------------------------------------------------------
+// For videos over ~2 minutes, group the scenes in chapters (about one minute each):
+//     CHAPTER 1: The Watch
+//     MUSIC: calm, slow           (optional: music mood for this chapter)
+//     SCENE 1 | 4s
+//     ...
+// Chapter titles appear on screen and the music changes per chapter.
+// Long VOICE lines are fine: the factory splits them into extra shots by itself.
+
+// ---- SCENES ---------------------------------------------------------------------------
+// One block per scene. "| 3s" is the wanted length; if the voice line is longer, the scene
+// grows to fit it (about 2.6 spoken words per second, so 12 words = about 5 s).
+//
+//  VISUAL  what the camera sees: who, doing what, where, light, shot type (20-40 words).
+//          Name the character and the place again in every scene. Never ask for written
+//          words, signs or screens here (AI draws them as gibberish); words go in TEXT.
+//  MOTION  one camera move: slow push in / pull back / pan left / pan right / tilt up /
+//          tilt down / handheld / static, plus what moves (hair in the wind, waves crash).
+//  VOICE   what is spoken. Narration as plain text, or "Name: line" for a character.
+//          Leave empty for a silent scene.
+//  TEXT    optional big words on screen (max 6).
+//  SOUND   sound effects: wind, rain, waves, thunder, footsteps, heartbeat, clock, whoosh,
+//          impact, riser, static, fire, rumble (or your own files in the sfx/ folder).
+
+SCENE 1 | 3s
+VISUAL:
+MOTION: slow push in
+VOICE:
+TEXT:
+SOUND:
+
+SCENE 2 | 4s
+VISUAL:
+MOTION:
+VOICE:
+TEXT:
+SOUND:
+
+SCENE 3 | 4s
+VISUAL:
+MOTION:
+VOICE:
+TEXT:
+SOUND:
+
+SCENE 4 | 4s
+VISUAL:
+MOTION:
+VOICE:
+TEXT:
+SOUND:
+
+SCENE 5 | 4s
+VISUAL:
+MOTION:
+VOICE:
+TEXT:
+SOUND:
+
+SCENE 6 | 4s
+VISUAL:
+MOTION:
+VOICE:
+TEXT:
+SOUND:

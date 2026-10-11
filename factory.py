@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""Ole-K2-Free-Video: local TikTok video factory. No cloud, no tokens.
+
+    python3 factory.py                       start ComfyUI (if needed) + the web GUI, open the browser
+    python3 factory.py make story.txt        text file -> finished video (no GUI)
+    python3 factory.py write "idea" out.txt  the local LLM writes a script file
+    python3 factory.py doctor                check this PC: what is installed, what is missing
+    python3 factory.py shortcut              add a desktop/app-menu launcher (Linux)
+
+factory.sh (Linux/macOS) and factory.bat (Windows) just call this file.
+"""
+import argparse
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+import webbrowser
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(ROOT, "app"))
+if sys.version_info < (3, 9):
+    sys.exit("Python 3.9 or newer is needed (you have %d.%d)." % sys.version_info[:2])
+
+import comfy     # noqa: E402
+import config    # noqa: E402
+import llm       # noqa: E402
+
+STARTED = {"comfy": None}
+
+
+def say(msg):
+    print(msg, flush=True)
+
+
+# ------------------------------------------------------------------ services
+def comfy_command(cdir, url):
+    port = urllib.parse.urlparse(url).port or 8188
+    if os.path.isfile(os.path.join(cdir, "start.sh")) and platform.system() != "Windows":
+        return ["bash", os.path.join(cdir, "start.sh")]
+    cands = [os.path.join(cdir, "venv", "bin", "python"), os.path.join(cdir, ".venv", "bin", "python"),
+             os.path.join(cdir, "venv", "Scripts", "python.exe"), os.path.join(cdir, ".venv", "Scripts", "python.exe"),
+             os.path.join(os.path.dirname(cdir), "python_embeded", "python.exe")]
+    py = next((p for p in cands if os.path.isfile(p)), sys.executable)
+    return [py, "-s", os.path.join(cdir, "main.py"), "--listen", "127.0.0.1", "--port", str(port)]
+
+
+def ensure_comfy(s, wait=180):
+    comfy.configure(s["comfy_url"])
+    if comfy.alive():
+        return True
+    host = urllib.parse.urlparse(s["comfy_url"]).hostname
+    cdir = config.find_comfy_dir(s)
+    if host not in ("127.0.0.1", "localhost") or not cdir or not s.get("comfy_autostart", True):
+        say(f"! ComfyUI is not reachable at {s['comfy_url']}" + ("" if cdir else " and no local ComfyUI folder was found"))
+        return False
+    cmd = comfy_command(cdir, s["comfy_url"])
+    log = open(os.path.join(config.LOGS_DIR, "comfyui.log"), "a")
+    say(f"Starting ComfyUI ({cdir}) ... log: logs/comfyui.log")
+    kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
+    STARTED["comfy"] = subprocess.Popen(cmd, cwd=cdir, stdout=log, stderr=subprocess.STDOUT, **kw)
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        if comfy.alive():
+            say(f"ComfyUI is up ({time.time() - t0:.0f} s)")
+            return True
+        if STARTED["comfy"].poll() is not None:
+            say("! ComfyUI stopped while starting. See logs/comfyui.log")
+            return False
+        time.sleep(2)
+    say("! ComfyUI did not answer in time. See logs/comfyui.log")
+    return False
+
+
+def ensure_ollama(s):
+    llm.configure(s["ollama_url"])
+    if llm.alive():
+        return True
+    host = urllib.parse.urlparse(s["ollama_url"]).hostname
+    exe = shutil.which("ollama")
+    if host in ("127.0.0.1", "localhost") and exe:
+        say("Starting Ollama ...")
+        log = open(os.path.join(config.LOGS_DIR, "ollama.log"), "a")
+        kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
+        subprocess.Popen([exe, "serve"], stdout=log, stderr=subprocess.STDOUT, **kw)
+        for _ in range(20):
+            time.sleep(1)
+            if llm.alive():
+                return True
+    say(f"! Ollama is not reachable at {s['ollama_url']} (story writing with the local AI will not work)")
+    return False
+
+
+def stop_started():
+    p = STARTED["comfy"]
+    if p and p.poll() is None:
+        say("Stopping the ComfyUI this launcher started ...")
+        p.terminate()
+        try:
+            p.wait(20)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+# ------------------------------------------------------------------ commands
+def cmd_gui(a):
+    s = config.load_settings()
+    ok, why = config.ffmpeg_ok()
+    if not ok:
+        say(f"! {why}. Install ffmpeg first (see INSTALL.md).")
+    if not a.no_comfy:
+        threading.Thread(target=ensure_comfy, args=(s,), daemon=True).start()
+    threading.Thread(target=ensure_ollama, args=(s,), daemon=True).start()
+    port = a.port or int(s.get("port", 8770))
+    url = f"http://127.0.0.1:{port}"
+    if not a.no_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    say(f"\n  Ole-K2 Free Video is running:  {url}\n  Close this window or press Ctrl+C to stop.\n")
+    sys.argv = [sys.argv[0], "--port", str(port), "--host", a.host]
+    import server
+    try:
+        server.main()
+    finally:
+        stop_started()
+
+
+def cmd_make(a):
+    s = config.load_settings()
+    if not ensure_comfy(s):
+        sys.exit("ComfyUI is needed to make pictures and voices. Start it, or check Settings / INSTALL.md.")
+    import pipeline
+    try:
+        pipeline.make(a.file, a.engine, a.quality, a.voice, a.music, a.name, a.output)
+    finally:
+        stop_started()
+
+
+def cmd_write(a):
+    s = config.load_settings()
+    if not ensure_ollama(s):
+        sys.exit(1)
+    import scriptfmt
+    hw = config.hardware(s)
+    model = a.model or llm.pick_model(s.get("llm"), hw["vram_gb"])
+    if not model:
+        sys.exit("No local LLM installed: run  ollama pull qwen2.5:7b  (or use the Models tab).")
+    comfy.configure(s["comfy_url"])
+    comfy.free_vram()
+    voices = sorted(comfy.voices()) or sorted(comfy.FALLBACK_VOICES)
+    say(f"Writing with {model} ...")
+    sc, _ = llm.write_story(model, a.idea, a.seconds, a.genre, a.narration, a.extra, voices,
+                            on_stage=lambda st: say("  " + st), ctx=int(s.get("llm_ctx", 8192)))
+    text = scriptfmt.format_script(sc)
+    out = a.out or (sc["title"] or "story").lower().replace(" ", "-")[:40] + ".txt"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(text)
+    say(text)
+    say(f"Saved: {out}\nNext:  ./factory.sh make {out}")
+
+
+def cmd_doctor(a):
+    s = config.load_settings()
+    rows = []
+
+    def row(name, ok, detail, fix=""):
+        rows.append((("OK  " if ok else ("--  " if ok is None else "MISS")), name, detail, "" if ok else fix))
+
+    row("Python", True, platform.python_version())
+    ok, why = config.ffmpeg_ok()
+    row("ffmpeg + libass", ok, why if not ok else shutil.which("ffmpeg"), "install ffmpeg (INSTALL.md)")
+    row("ffprobe", bool(shutil.which("ffprobe")), shutil.which("ffprobe") or "not found", "comes with ffmpeg")
+    comfy.configure(s["comfy_url"])
+    up = comfy.alive()
+    cdir = config.find_comfy_dir(s)
+    row("ComfyUI folder", bool(cdir), cdir or "not found", "install ComfyUI or set its folder in Settings")
+    row("ComfyUI running", up if up else None, s["comfy_url"] if up else "not running (the GUI starts it)")
+    if up:
+        row("TTS-Audio-Suite node", comfy.has_node("UnifiedTTSTextNode"), "voices",
+            "ComfyUI-Manager > install 'TTS Audio Suite' (INSTALL.md)")
+        row("LTX nodes", comfy.has_node("LTXVImgToVideo"), "video", "update ComfyUI")
+        ck = comfy.models("checkpoints")
+        img = [c for c in ck if not any(x in c.lower() for x in ("ltx", "ace_step", "stable-audio"))]
+        row("Image model (SDXL)", bool(img), ", ".join(img) or "none", "Models tab: SDXL base 1.0")
+        row("LTX video model", any("ltx" in c.lower() for c in ck), ", ".join(c for c in ck if "ltx" in c.lower()) or "none",
+            "Models tab: LTX-Video 2B (or use the 'Image + camera move' engine)")
+        row("T5 encoder (LTX)", "t5xxl_fp8_e4m3fn_scaled.safetensors" in comfy.models("text_encoders"), "text_encoders",
+            "Models tab: T5-XXL text encoder")
+    llm.configure(s["ollama_url"])
+    lu = llm.alive()
+    row("Ollama", lu, s["ollama_url"] if lu else "not reachable", "install from ollama.com")
+    if lu:
+        ms = llm.installed()
+        row("Story LLM", bool(ms), ", ".join(m["name"] for m in ms[:6]) or "none", "ollama pull qwen2.5:7b")
+    hw = config.hardware(s)
+    row("GPU", bool(hw["vram_gb"]), f"{hw['gpu'] or '?'} {hw['vram_gb']} GB VRAM, {hw['ram_gb']} GB RAM",
+        "NVIDIA card + driver recommended")
+    rec = config.recommended(hw["vram_gb"], hw["ram_gb"])
+    w = max(len(r[1]) for r in rows)
+    say("")
+    for st, name, detail, fix in rows:
+        say(f" {st} {name.ljust(w)}  {detail}" + (f"\n      -> {fix}" if fix else ""))
+    say(f"\n Suggested for this PC: quality '{rec['quality']}', engine '{rec['engine']}', "
+        f"LLMs up to ~{rec['llm_max_gb']} GB.\n")
+
+
+def cmd_shortcut(a):
+    if platform.system() != "Linux":
+        sys.exit("On Windows: right-click factory.bat > Send to > Desktop (create shortcut).")
+    d = os.path.expanduser("~/.local/share/applications")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "ole-k2-free-video.desktop")
+    with open(p, "w") as f:
+        f.write(f"""[Desktop Entry]
+Type=Application
+Name=Ole-K2 Free Video
+Comment=Local TikTok video factory
+Exec=bash -c 'cd "{ROOT}" && ./factory.sh'
+Terminal=true
+Icon=video-x-generic
+Categories=AudioVideo;Video;
+""")
+    say(f"Launcher added: {p} (search 'Ole-K2' in the app menu)")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Ole-K2-Free-Video: local TikTok video factory")
+    sub = ap.add_subparsers(dest="cmd")
+    g = sub.add_parser("gui", help="start the web GUI (default)")
+    for p in (ap, g):
+        p.add_argument("--port", type=int, default=0)
+        p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 = reachable from other PCs (no password)")
+        p.add_argument("--no-browser", action="store_true")
+        p.add_argument("--no-comfy", action="store_true", help="do not start ComfyUI")
+    m = sub.add_parser("make", help="script file -> finished video")
+    m.add_argument("file")
+    m.add_argument("--engine", default="", help="ltx_i2v | still | ltx_t2v | wan")
+    m.add_argument("--quality", default="", help="draft | standard | high | max")
+    m.add_argument("--voice", default="", help="narrator voice, e.g. male_01")
+    m.add_argument("--music", default="", help="builtin | file | ace | none")
+    m.add_argument("--name", default="", help="project name")
+    m.add_argument("--output", default="", help="output file name (in exports/)")
+    w = sub.add_parser("write", help="local LLM writes a script file from an idea")
+    w.add_argument("idea")
+    w.add_argument("out", nargs="?", default="")
+    w.add_argument("--seconds", type=int, default=30)
+    w.add_argument("--genre", default="")
+    w.add_argument("--narration", default="narrator", help="narrator | mixed | dialogue | none")
+    w.add_argument("--extra", default="")
+    w.add_argument("--model", default="")
+    sub.add_parser("doctor", help="check what is installed")
+    sub.add_parser("shortcut", help="add an app-menu launcher (Linux)")
+    a = ap.parse_args()
+    {"make": cmd_make, "write": cmd_write, "doctor": cmd_doctor, "shortcut": cmd_shortcut}.get(a.cmd, cmd_gui)(a)
+
+
+if __name__ == "__main__":
+    main()

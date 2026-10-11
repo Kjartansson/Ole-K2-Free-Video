@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ole-K2 Free Video</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">K2</span><div><b>Free Video</b><small>local TikTok factory</small></div></div>
+  <div class="projbar">
+    <label for="projSel">Project</label>
+    <select id="projSel"><option value="">(no project yet)</option></select>
+    <button class="ghost" id="btnNewProj" title="Start an empty script">New</button>
+  </div>
+  <div class="pills" id="pills">
+    <span class="pill" id="pComfy">ComfyUI</span>
+    <span class="pill" id="pOllama">Ollama</span>
+    <span class="pill info" id="pHw">GPU ? GB · RAM ? GB</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="story" class="on"><i>1</i>Story</button>
+  <button data-tab="scenes"><i>2</i>Scenes</button>
+  <button data-tab="render"><i>3</i>Render</button>
+  <button data-tab="library">Library</button>
+  <button data-tab="models">Models</button>
+  <button data-tab="settings">Settings</button>
+  <button data-tab="help">Help</button>
+</nav>
+
+<main>
+<!-- ============================================================ STORY -->
+<section id="tab-story" class="tab on">
+  <div class="cols">
+    <div class="col">
+      <div class="seg" id="srcSeg">
+        <button data-src="ai" class="on">Write with local AI</button>
+        <button data-src="paste">From ChatGPT / DeepSeek</button>
+        <button data-src="tpl">Template</button>
+      </div>
+
+      <div class="card src" id="src-ai">
+        <h3>Your idea</h3>
+        <textarea id="idea" rows="4" placeholder="e.g. a delivery driver finds a package addressed to himself, dated tomorrow"></textarea>
+        <div class="grid2">
+          <label>Genre / tone<input id="genre" list="genres" placeholder="mystery thriller"></label>
+          <label>Length<select id="length"><option value="15">15 s</option><option value="30" selected>30 s</option><option value="45">45 s</option><option value="60">1 min</option><option value="90">1.5 min</option><option value="120">2 min</option><option value="180">3 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="900">15 min</option></select></label>
+          <label>Voice style<select id="narration">
+            <option value="narrator">Narrator tells it</option>
+            <option value="mixed">Narrator + characters</option>
+            <option value="dialogue">Characters only</option>
+            <option value="none">No voice (music + text)</option></select></label>
+          <label>Local LLM<select id="llmSel"></select></label>
+        </div>
+        <label>Extra wishes<input id="extra" placeholder="e.g. twist ending, set in Norway, for kids, funny"></label>
+        <div class="row">
+          <button class="primary" id="btnWrite">Write story</button>
+          <span class="muted" id="writeHint">Runs on your PC. Short: about 30-90 s. Long videos are written chapter by chapter (about 30 s per chapter).</span>
+        </div>
+        <div class="taskbox hidden" id="llmBox">
+          <div class="taskhead"><b id="llmStage">Working</b><button class="ghost small" id="btnLlmStop">Stop</button></div>
+          <pre id="llmText"></pre>
+        </div>
+        <datalist id="genres">
+          <option>mystery thriller</option><option>horror</option><option>sci-fi</option><option>fantasy</option>
+          <option>drama</option><option>comedy</option><option>motivational</option><option>true story / history</option>
+          <option>did you know facts</option><option>fairy tale for kids</option><option>romance</option>
+        </datalist>
+      </div>
+
+      <div class="card src hidden" id="src-paste">
+        <h3>Use a free web AI for the writing</h3>
+        <ol class="steps">
+          <li>Write your idea below (or leave it empty) and click <b>Copy prompt</b>.</li>
+          <li>Paste it into ChatGPT, DeepSeek, Gemini ... and send.</li>
+          <li>Copy the whole answer and paste it into the <b>Script</b> box on the right.</li>
+          <li>Click <b>Check</b>, then <b>Save and render video</b>. Everything after this runs on your PC.</li>
+        </ol>
+        <textarea id="ideaWeb" rows="3" placeholder="Your idea for the web AI"></textarea>
+        <div class="grid2">
+          <label>Genre / tone<input id="genreWeb" list="genres"></label>
+          <label>Length<select id="lengthWeb"><option value="15">15 s</option><option value="30" selected>30 s</option><option value="45">45 s</option><option value="60">1 min</option><option value="90">1.5 min</option><option value="120">2 min</option><option value="180">3 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="900">15 min</option></select></label>
+        </div>
+        <div class="row"><button class="primary" id="btnCopyPrompt">Copy prompt</button><span class="muted" id="copyHint"></span></div>
+        <p class="muted">Pasted something in another format (a screenplay, a list, JSON)? Paste it anyway and click
+          <b>Convert with local AI</b> under the script.</p>
+      </div>
+
+      <div class="card src hidden" id="src-tpl">
+        <h3>What a video needs</h3>
+        <p>The template lists every field with a short explanation. Only one thing is required:
+          at least one <code>SCENE</code> with a <code>VISUAL</code>. Everything else has a default.</p>
+        <table class="fields">
+          <tr><td>TITLE</td><td>name of the video</td></tr>
+          <tr><td>STYLE</td><td>one look for every shot (keeps scenes matching)</td></tr>
+          <tr><td>CHARACTER</td><td>Name = fixed look | voice: male_01</td></tr>
+          <tr><td>NARRATOR</td><td>voice for the narration</td></tr>
+          <tr><td>MUSIC</td><td>mood of the background music</td></tr>
+          <tr><td>CAPTION / HASHTAGS</td><td>the TikTok description</td></tr>
+          <tr><td>HOOK</td><td>first words on screen, also on the cover</td></tr>
+          <tr><td>SCENE n | 4s</td><td>VISUAL, MOTION, VOICE, TEXT, SOUND</td></tr>
+        </table>
+        <div class="row">
+          <button id="btnTplBlank">Put blank template in the editor</button>
+          <button id="btnTplExample">Load the example</button>
+          <button class="ghost" id="btnTplCopy">Copy template</button>
+        </div>
+        <p class="muted">Files: <code>templates/video-template.txt</code>, <code>templates/copy-to-chatgpt.txt</code>,
+          <code>examples/lighthouse.txt</code></p>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="cardhead"><h3>Script</h3><span class="muted" id="scriptStat"></span></div>
+        <textarea id="script" class="mono" rows="26" spellcheck="false" placeholder="Paste or write the script here. Use the Template tab to see the format."></textarea>
+        <div class="row">
+          <button id="btnCheck">Check</button>
+          <button id="btnTidy" title="Rewrite in the clean factory format">Tidy format</button>
+          <button id="btnConvert" title="Turn any text into the factory format with the local LLM">Convert with local AI</button>
+        </div>
+        <div class="row">
+          <input id="improveText" placeholder="Improve how? (empty = stronger hook, tighter lines, better ending)">
+          <button id="btnImprove">Improve with local AI</button>
+        </div>
+        <ul class="warnings" id="warnings"></ul>
+      </div>
+      <div class="card">
+        <h3>Save</h3>
+        <div class="grid2">
+          <label>Project name<input id="projName" placeholder="e.g. Lighthouse part 1"></label>
+          <label>Output file name<input id="outName" placeholder="empty = date_project-name"></label>
+        </div>
+        <div class="row">
+          <button class="primary" id="btnSaveRender">Save and render video</button>
+          <button id="btnSaveNew">Save as new project</button>
+          <button id="btnSaveCur" class="hidden">Save to this project</button>
+          <span class="muted" id="saveHint"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ SCENES -->
+<section id="tab-scenes" class="tab">
+  <div class="empty hidden" id="scenesEmpty"><p>No project is open. Pick one, or save a script on the Story tab first.</p><div class="projpick"></div></div>
+  <div id="scenesWrap">
+    <div class="card">
+      <div class="cardhead"><h3 id="sbTitle">Storyboard</h3><span class="muted" id="sbStat"></span></div>
+      <div class="grid3">
+        <label>Title<input data-h="title"></label>
+        <label>Narrator voice<input data-h="narrator" list="voiceList"></label>
+        <label>Hook (scene 1 text + cover)<input data-h="hook"></label>
+      </div>
+      <label>Style (added to every picture)<input data-h="style"></label>
+      <label>Characters (one per line: Name = look | voice: male_01)<textarea data-h="characters" rows="2" class="mono"></textarea></label>
+      <div class="grid3">
+        <label>Music mood<input data-h="music"></label>
+        <label>Caption<input data-h="caption"></label>
+        <label>Hashtags<input data-h="hashtags"></label>
+      </div>
+      <datalist id="voiceList"></datalist>
+    </div>
+    <div class="scenes" id="sceneCards"></div>
+    <div class="row"><button id="btnAddScene">Add scene</button><span class="muted" id="sbSaved"></span></div>
+  </div>
+</section>
+
+<!-- ============================================================ RENDER -->
+<section id="tab-render" class="tab">
+  <div class="empty hidden" id="renderEmpty"><p>No project is open. Pick one, or save a script on the Story tab first.</p><div class="projpick"></div></div>
+  <div class="cols" id="renderWrap">
+    <div class="col">
+      <div class="card">
+        <h3>Names</h3>
+        <div class="grid2">
+          <label>Project name<input id="rName"></label>
+          <label>Output file name<input id="rOut" placeholder="empty = date_project-name"></label>
+        </div>
+        <p class="muted small">The video is saved as <code id="rOutPreview"></code> in the <code>exports</code> folder.</p>
+      </div>
+      <div class="card">
+        <h3>Video options <span class="muted small">(empty = default from Settings)</span></h3>
+        <div class="grid2" id="optGrid">
+          <label>Picture engine<select data-o="engine"></select></label>
+          <label>Quality<select data-o="quality"></select></label>
+          <label>Narrator voice<select data-o="voice_override"></select></label>
+          <label>Voice language<select data-o="voice_language"></select></label>
+          <label>Voice speed<select data-o="voice_speed"><option value="">default</option><option>0.9</option><option>1.0</option><option>1.1</option><option>1.2</option></select></label>
+          <label>Voice emotion<select data-o="voice_emotion"><option value="">default</option><option value="0.3">calm</option><option value="0.5">normal</option><option value="0.8">dramatic</option></select></label>
+          <label>Music<select data-o="music"><option value="">default</option><option value="builtin">built-in pad (no model)</option><option value="file">file from music folder</option><option value="ace">AI music (ACE-Step)</option><option value="none">no music</option></select></label>
+          <label>Music file<select data-o="music_file"></select></label>
+          <label>Sound effects<select data-o="sfx"><option value="">default</option><option value="true">on</option><option value="false">off</option></select></label>
+          <label>Subtitles<select data-o="subtitles"><option value="">default</option><option value="true">on</option><option value="false">off</option></select></label>
+          <label>On-screen text<select data-o="onscreen_text"><option value="">default</option><option value="true">on</option><option value="false">off</option></select></label>
+          <label>Transitions<select data-o="transition"><option value="">default</option><option value="crossfade">crossfade</option><option value="fade">dip to black</option><option value="cut">hard cut</option></select></label>
+          <label>Look<select data-o="look"><option value="">default</option><option value="film">film (shared grade + grain)</option><option value="clean">clean</option></select></label>
+          <label>Chapter titles<select data-o="chapter_titles"><option value="">default</option><option value="true">on</option><option value="false">off</option></select></label>
+        </div>
+        <p class="muted small">Long voice lines are split into extra shots automatically (another framing of the same scene),
+          so every clip stays within what this PC's video model can make.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <div class="row">
+          <button class="primary big" id="btnRender">Render video</button>
+          <button class="ghost" id="btnCancel">Cancel</button>
+          <span class="muted" id="renderHint"></span>
+        </div>
+        <p class="rec" id="estimate"></p>
+        <div class="progress"><div id="pBar"></div></div>
+        <div class="jobline"><b id="jobStage">Idle</b> <span id="jobMsg" class="muted"></span></div>
+        <ul class="warnings" id="jobWarn"></ul>
+        <details><summary>Log</summary><pre id="jobLog" class="log"></pre></details>
+      </div>
+      <div class="card hidden" id="resultCard">
+        <h3>Finished video</h3>
+        <div class="result">
+          <video id="finalVid" controls playsinline></video>
+          <div>
+            <img id="coverImg" alt="cover">
+            <label>Caption for TikTok<textarea id="capText" rows="5"></textarea></label>
+            <div class="row"><button id="btnCopyCap">Copy caption</button><button class="ghost" id="btnOpenExports">Open exports folder</button></div>
+            <p class="muted small" id="exportInfo"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ LIBRARY -->
+<section id="tab-library" class="tab">
+  <div class="cardhead"><h3>Finished videos</h3><button class="ghost" id="btnOpenExports2">Open exports folder</button></div>
+  <p class="muted">Upload to TikTok yourself: pick the file from <code>exports/</code>, paste the caption, choose the cover. Tick "posted" to keep track.</p>
+  <div class="lib" id="libGrid"></div>
+</section>
+
+<!-- ============================================================ MODELS -->
+<section id="tab-models" class="tab">
+  <div class="card"><div id="mHw"></div></div>
+  <div class="card">
+    <h3>Story writer (Ollama LLMs)</h3>
+    <table class="tbl" id="llmTbl"></table>
+    <h4>Get another LLM</h4>
+    <table class="tbl" id="llmSugg"></table>
+    <div class="row"><input id="pullName" placeholder="any Ollama name, e.g. qwen2.5:7b or hf.co/user/repo:Q4_K_M"><button id="btnPull">Pull</button></div>
+    <details><summary>Find GGUF models on Hugging Face</summary>
+      <div class="row"><input id="hfQ" placeholder="search, e.g. qwen 7b instruct"><button id="btnHfSearch">Search</button></div>
+      <div id="hfRes"></div>
+    </details>
+  </div>
+  <div class="card">
+    <h3>Picture, video, music and sound models (ComfyUI)</h3>
+    <p class="muted small" id="mDir"></p>
+    <table class="tbl" id="catTbl"></table>
+    <details><summary>Download any Hugging Face file</summary>
+      <div class="grid3">
+        <label>File link<input id="cUrl" placeholder="https://huggingface.co/user/repo/blob/main/model.safetensors"></label>
+        <label>ComfyUI folder<select id="cFolder"><option>checkpoints</option><option>diffusion_models</option><option>text_encoders</option><option>vae</option><option>loras</option><option>upscale_models</option></select></label>
+        <label>Save as (optional)<input id="cName"></label>
+      </div>
+      <button id="btnCustomDl">Download</button>
+    </details>
+  </div>
+  <div id="dlTasks"></div>
+</section>
+
+<!-- ============================================================ SETTINGS -->
+<section id="tab-settings" class="tab">
+  <div class="cols">
+    <div class="col">
+      <div class="card">
+        <h3>This PC</h3>
+        <p class="muted small">Type your graphics card memory and RAM (0 = detect). Models and quality are suggested from these.</p>
+        <div class="grid2">
+          <label>Graphics card memory (GB)<input type="number" step="0.5" min="0" data-s="vram_gb"></label>
+          <label>PC RAM (GB)<input type="number" step="1" min="0" data-s="ram_gb"></label>
+        </div>
+        <div class="row"><button class="ghost" id="btnDetect">Detect</button><span class="muted" id="detected"></span></div>
+        <p id="recText" class="rec"></p>
+      </div>
+      <div class="card">
+        <h3>Connections</h3>
+        <label>ComfyUI address<input data-s="comfy_url"></label>
+        <label>ComfyUI folder on this PC (for downloads and auto start)<input data-s="comfy_dir" placeholder="auto"></label>
+        <label class="check"><input type="checkbox" data-s="comfy_autostart"> Start ComfyUI with the factory</label>
+        <label>Ollama address<input data-s="ollama_url"></label>
+        <label>Hugging Face token (only for gated models, stays on this PC)<input type="password" data-s="hf_token" autocomplete="off"></label>
+        <p class="muted small">ComfyUI and Ollama may run on another workstation: put its address here (e.g. http://192.168.1.20:8188).</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3>Defaults for new videos</h3>
+        <div class="grid2">
+          <label>Story LLM<select data-s="llm"></select></label>
+          <label>Picture engine<select data-s="engine"></select></label>
+          <label>Image model<select data-s="image_model"></select></label>
+          <label>Video model (LTX)<select data-s="video_model"></select></label>
+          <label>Quality<select data-s="quality"></select></label>
+          <label>Transitions<select data-s="transition"><option value="crossfade">crossfade</option><option value="fade">dip to black</option><option value="cut">hard cut</option></select></label>
+          <label>Look<select data-s="look"><option value="film">film (shared grade + grain)</option><option value="clean">clean</option></select></label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Voice</h3>
+        <div class="grid2">
+          <label>Narrator voice<select data-s="voice"></select></label>
+          <label>Language<select data-s="voice_language"></select></label>
+          <label>Speed<input type="number" step="0.05" min="0.7" max="1.4" data-s="voice_speed"></label>
+          <label>Emotion (0.3 calm - 0.9 dramatic)<input type="number" step="0.05" min="0.2" max="1.2" data-s="voice_emotion"></label>
+        </div>
+        <div class="row"><input id="pvText" placeholder="Test sentence"><button id="btnPreview">Hear voice</button></div>
+        <audio id="pvAudio" controls class="hidden"></audio>
+        <h4>Your own voice</h4>
+        <p class="muted small">Record 10-20 seconds of clear speech (or upload a file). It appears as a voice you can pick.
+          Only use your own voice or one you have permission for.</p>
+        <div class="row">
+          <input id="ownName" placeholder="name, e.g. ole" value="my-voice">
+          <button id="btnRec">Record</button>
+          <label class="filebtn">Upload<input type="file" id="ownFile" accept="audio/*"></label>
+          <span class="muted" id="recHint"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Sound and text</h3>
+        <div class="grid2">
+          <label>Music<select data-s="music"><option value="builtin">built-in pad (no model)</option><option value="file">file from music folder</option><option value="ace">AI music (ACE-Step)</option><option value="none">no music</option></select></label>
+          <label>Music file<select data-s="music_file"></select></label>
+          <label>Music volume<input type="number" step="0.02" min="0" max="1" data-s="music_volume"></label>
+          <label>Sound effects<select data-s="sfx_engine"><option value="builtin">built-in + sfx folder</option><option value="ai">AI (Stable Audio)</option></select></label>
+          <label>Effects volume<input type="number" step="0.05" min="0" max="1" data-s="sfx_volume"></label>
+          <label>Subtitle font<input data-s="sub_font" placeholder="auto"></label>
+        </div>
+        <label class="check"><input type="checkbox" data-s="sfx"> Sound effects</label>
+        <label class="check"><input type="checkbox" data-s="subtitles"> Spoken-word subtitles</label>
+        <label class="check"><input type="checkbox" data-s="onscreen_text"> Big on-screen TEXT / hook</label>
+        <label class="check"><input type="checkbox" data-s="chapter_titles"> Chapter titles on screen (long videos)</label>
+        <div class="row">
+          <label class="filebtn">Add music file<input type="file" id="musicFile" accept="audio/*"></label>
+          <label class="filebtn">Add sound effect<input type="file" id="sfxFile" accept="audio/*"></label>
+          <span class="muted small" id="addHint"></span>
+        </div>
+      </div>
+      <div class="row"><button class="primary" id="btnSaveSettings">Save settings</button><span class="muted" id="setHint"></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ HELP -->
+<section id="tab-help" class="tab">
+  <div class="card prose">
+    <h3>How to make a video</h3>
+    <ol>
+      <li><b>Story tab:</b> write the idea and click <b>Write story</b> (local AI), or copy the prompt to ChatGPT/DeepSeek and paste the answer into the Script box. Click <b>Check</b>.</li>
+      <li>Give it a <b>project name</b> and an <b>output file name</b>, click <b>Save as new project</b>.</li>
+      <li><b>Scenes tab:</b> fix any scene. <b>Preview</b> renders one scene so you can check it fast. <b>New picture</b> tries another seed.</li>
+      <li><b>Render tab:</b> pick options (or keep the defaults) and click <b>Render video</b>.</li>
+      <li>When it is done: copy the caption, open the <code>exports</code> folder and upload the MP4 to TikTok yourself.</li>
+    </ol>
+    <h3>Picture engines</h3>
+    <ul>
+      <li><b>Image + LTX animation</b>: a still for each scene, then LTX makes it move. Best balance.</li>
+      <li><b>Image + camera move</b>: a still with a smooth zoom/pan. Fastest, works on small cards.</li>
+      <li><b>LTX text-to-video</b> and <b>Wan 2.1</b>: video straight from the text (less control).</li>
+      <li><b>My own clip</b>: upload a clip or picture on a scene card.</li>
+    </ul>
+    <h3>Long videos (up to 15 minutes)</h3>
+    <ul>
+      <li>Pick a length of 2-15 min. The local AI plans chapters first, then writes them one by one.</li>
+      <li>From ChatGPT/DeepSeek: the copied prompt asks for one chapter per answer. Write "next" for the
+        next chapter and paste all answers one after another into the Script box.</li>
+      <li>Plain story text without scenes also works: every sentence or two becomes a scene. <b>Convert with local AI</b>
+        gives better pictures and handles long texts in parts.</li>
+      <li>The factory splits long lines into extra shots, crossfades every cut, keeps sounds running across cuts,
+        changes the music per chapter and shows chapter titles. The Render tab shows how long it will take.</li>
+    </ul>
+    <h3>No GUI? Use the command line</h3>
+    <pre class="mono">./factory.sh make my-story.txt           # text file -> finished video
+./factory.sh write "an idea" my-story.txt  # local AI writes the script file
+./factory.sh                               # start the GUI</pre>
+    <p class="muted">Nothing here uses the cloud. Nothing is posted automatically.</p>
+  </div>
+</section>
+</main>
+
+<div class="toast hidden" id="toast"></div>
+<script src="/web/app.js"></script>
+</body>
+</html>

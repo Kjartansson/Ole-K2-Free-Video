@@ -1,0 +1,11 @@
+# Ole-K2-Free-Video needs NO pip packages: the factory is pure Python standard library.
+# Nothing to install with pip for the factory itself. What it needs instead:
+#
+#   Python 3.9+            https://www.python.org  (Linux: already installed)
+#   ffmpeg (with libass)   Linux: sudo apt install ffmpeg   Windows: winget install Gyan.FFmpeg
+#   Ollama                 https://ollama.com  (local LLM for writing stories)
+#   ComfyUI                https://github.com/comfyanonymous/ComfyUI  (pictures, video, voices)
+#     + custom node "TTS Audio Suite"  https://github.com/diodiogod/TTS-Audio-Suite
+#
+# ComfyUI has its OWN requirements (torch with CUDA etc.); install them inside ComfyUI's
+# folder as its README says. Step-by-step: INSTALL.md
