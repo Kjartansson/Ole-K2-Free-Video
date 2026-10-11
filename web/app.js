@@ -119,6 +119,7 @@ async function loadProjects(select) {
   sel.innerHTML = '<option value="">(new script, not saved)</option>' +
     r.projects.map(p => `<option value="${esc(p.slug)}">${esc(p.name)}${p.final ? '' : ' (not rendered)'}</option>`).join('');
   let want = select !== undefined ? select : S.slug;
+  if (want && !r.projects.some(p => p.slug === want)) want = '';      // remembered project was deleted
   if (!want && r.projects.length && !S.newScript) want = r.projects[0].slug;   // open the newest
   sel.value = r.projects.some(p => p.slug === want) ? want : '';
   if (sel.value !== S.slug || select !== undefined) await openProject(sel.value);
@@ -673,10 +674,11 @@ function fillSettings() {
   opts('[data-s="voice"]', [...I.voices, ...I.own_voices], s.voice);
   opts('[data-s="voice_language"]', I.languages, s.voice_language);
   opts('[data-s="music_file"]', I.music_files, s.music_file, 'random');
+  opts('[data-s="brand_logo"]', I.brand_logos || [], s.brand_logo, 'none');
   $$('[data-s]').forEach(el => {
     const v = s[el.dataset.s];
     if (el.type === 'checkbox') el.checked = !!v;
-    else if (el.tagName !== 'SELECT' || ['transition', 'music', 'sfx_engine', 'look'].includes(el.dataset.s)) el.value = v ?? '';
+    else if (el.tagName !== 'SELECT' || ['transition', 'music', 'sfx_engine', 'look', 'brand_position', 'banner_when'].includes(el.dataset.s)) el.value = v ?? '';
   });
   $('#detected').textContent = `Detected: ${hw.gpu || 'no GPU found'} · ${fmtGB(hw.detected_vram_gb)} VRAM · ${fmtGB(hw.detected_ram_gb)} RAM (${hw.source || 'local'})`;
   $('#recText').innerHTML = `With <b>${fmtGB(hw.vram_gb)}</b> graphics memory and <b>${fmtGB(hw.ram_gb)}</b> RAM: quality <b>${rec.quality}</b>,
@@ -748,6 +750,14 @@ $('#sfxFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   api('/api/sfx/upload?name=' + encodeURIComponent(f.name), f, true)
     .then(() => { $('#addHint').textContent = 'Sound added (its file name words are matched to SOUND lines)'; }).catch(fail);
+};
+$('#logoFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  api('/api/brand/upload?name=' + encodeURIComponent(f.name), f, true)
+    .then(r => loadInfo().then(fillSettings).then(() => {
+      $('[data-s="brand_logo"]').value = r.file;
+      $('#logoHint').textContent = 'Logo added. Click Save settings.';
+    })).catch(fail);
 };
 
 // ------------------------------------------------------------------ start

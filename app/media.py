@@ -293,11 +293,17 @@ def _esc(s):
     return s.replace("\\", "\\\\").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
+def _hex6(hexrgb):
+    """'#abc' / '#AABBCC' -> 'AABBCC'; anything else -> the default brand colour (never white on white)."""
+    h = (hexrgb or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9a-fA-F]{3}", h):
+        h = "".join(c * 2 for c in h)
+    return h if re.fullmatch(r"[0-9a-fA-F]{6}", h) else "FFB020"
+
+
 def ass_color(hexrgb, alpha=0.0):
     """Hex #RRGGBB -> ASS &HAABBGGRR (alpha 0 = opaque, 1 = invisible)."""
-    h = (hexrgb or "").lstrip("#")
-    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):
-        h = "FFFFFF"
+    h = _hex6(hexrgb)
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     a = max(0, min(255, int(round(alpha * 255))))
     return "&H%02X%02X%02X%02X" % (a, b, g, r)
@@ -305,9 +311,7 @@ def ass_color(hexrgb, alpha=0.0):
 
 def text_on(hexrgb):
     """Readable text colour on a #RRGGBB background: black on light, white on dark."""
-    h = (hexrgb or "").lstrip("#")
-    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):
-        return "&H00FFFFFF"
+    h = _hex6(hexrgb)
     r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
     return "&H00000000" if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 else "&H00FFFFFF"
 

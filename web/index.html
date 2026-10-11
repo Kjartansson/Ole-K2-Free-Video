@@ -201,6 +201,7 @@
           <label>Transitions<select data-o="transition"><option value="">default</option><option value="crossfade">crossfade</option><option value="fade">dip to black</option><option value="cut">hard cut</option></select></label>
           <label>Look<select data-o="look"><option value="">default</option><option value="film">film (shared grade + grain)</option><option value="clean">clean</option></select></label>
           <label>Chapter titles<select data-o="chapter_titles"><option value="">default</option><option value="true">on</option><option value="false">off</option></select></label>
+          <label>Branding<select data-o="branding"><option value="">default (on)</option><option value="off">off for this video</option></select></label>
         </div>
         <p class="muted small">Long voice lines are split into extra shots automatically (another framing of the same scene),
           so every clip stays within what this PC's video model can make.</p>
@@ -350,6 +351,24 @@
           <label class="filebtn">Add sound effect<input type="file" id="sfxFile" accept="audio/*"></label>
           <span class="muted small" id="addHint"></span>
         </div>
+      </div>
+      <div class="card">
+        <h3>Branding (for marketing)</h3>
+        <p class="muted small">Empty = no branding. Used on every new video; switch it off per video on the Render tab.</p>
+        <div class="grid2">
+          <label>Website / brand (watermark + end card)<input data-s="brand_text" placeholder="e.g. voomreel.com"></label>
+          <label>Watermark position<select data-s="brand_position"><option value="top-left">top left</option><option value="top-center">top centre</option><option value="top-right">top right</option><option value="bottom-left">bottom left</option></select></label>
+          <label>Watermark opacity<input type="number" step="0.05" min="0.2" max="1" data-s="brand_opacity"></label>
+          <label>Logo (PNG, optional)<select data-s="brand_logo"></select></label>
+          <label>Banner text<input data-s="banner_text" placeholder="e.g. Free video downloader → voomreel.com"></label>
+          <label>Banner shows<select data-s="banner_when"><option value="start">first 5 s</option><option value="end">last 5 s</option><option value="always">the whole video</option></select></label>
+          <label>Banner colour<input type="color" data-s="brand_color"></label>
+          <label>End card line (above the brand)<input data-s="end_card_line" placeholder="e.g. Download any video at"></label>
+          <label>Add to every caption<input data-s="caption_add" placeholder="e.g. 🔗 voomreel.com"></label>
+        </div>
+        <label class="check"><input type="checkbox" data-s="brand_watermark"> Watermark the whole video</label>
+        <label class="check"><input type="checkbox" data-s="end_card"> End card (3 s) with the brand</label>
+        <div class="row"><label class="filebtn">Upload logo<input type="file" id="logoFile" accept="image/png,image/webp"></label><span class="muted small" id="logoHint"></span></div>
       </div>
       <div class="row"><button class="primary" id="btnSaveSettings">Save settings</button><span class="muted" id="setHint"></span></div>
     </div>

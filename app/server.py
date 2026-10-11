@@ -230,6 +230,8 @@ def info():
         "has_stable_audio": "stable-audio-open-1.0.safetensors" in ckpts,
         "music_files": media.music_files(), "sfx_builtin": sorted(media.BUILTIN_SFX),
         "sfx_user": sorted(os.path.relpath(p, config.SFX_DIR) for p in media.user_sfx()),
+        "brand_logos": sorted(f for f in os.listdir(config.BRAND_DIR)
+                              if f.lower().endswith((".png", ".webp"))),
         "comfy_dir": config.find_comfy_dir(s), "font": media.pick_font(s.get("sub_font", "")),
         "ffmpeg": config.ffmpeg_ok(), "root": config.ROOT,
     }
@@ -621,6 +623,8 @@ class Handler(BaseHTTPRequestHandler):
             return {"file": os.path.basename(save_upload(self, config.MUSIC_DIR, q.get("name", ""), AUDIO_EXT - {".webm", ".opus"}))}
         if P and p == "/api/sfx/upload":
             return {"file": os.path.basename(save_upload(self, config.SFX_DIR, q.get("name", ""), AUDIO_EXT - {".webm", ".opus"}))}
+        if P and p == "/api/brand/upload":
+            return {"file": os.path.basename(save_upload(self, config.BRAND_DIR, q.get("name", ""), {".png", ".webp"}))}
         if P and p == "/api/open":
             return {"opened": open_folder(self._body().get("what", ""))}
         return None
