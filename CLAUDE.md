@@ -53,8 +53,11 @@ Brief written 2026-10-11 from Ole's requests (Claude chat, 18:30-20:45). Read th
   llama3.2, plus 16k-context variants. Ollama and ComfyUI cannot both hold the 8 GB GPU:
   call ComfyUI `POST /free` before the LLM and use Ollama `keep_alive: 0` after.
 - Timings (incl. model load): SDXL 768x1344 image 19 s; Chatterbox voice line 28 s;
-  LTX image-to-video 512x896, 97 frames (4 s at 24 fps) 22 s, good motion.
-  Not yet timed: LTX text-to-video, Wan 2.1.
+  LTX image-to-video 512x896, 97 frames (4 s at 24 fps) 22 s, good motion;
+  LTX text-to-video 512x896, 49 frames (2 s) 16 s; Wan 2.1 t2v 480x832, 33 frames (2 s at 16 fps)
+  120 s (25 steps: works but slow on 8 GB, LTX stays the default). Own-voice path verified:
+  LoadAudio + CharacterVoicesNode output differs from the generic voice.
+  Not yet timed: ACE-Step music, Stable Audio sfx.
 - Node names/inputs (from `/object_info`): `ChatterBoxEngineNode` -> `UnifiedTTSTextNode`
   (narrator_voice = path like `voices_examples/female/female_01.wav`) -> `SaveAudio` (flac);
   own voice: `LoadAudio` -> `CharacterVoicesNode(opt_audio_input)` -> `opt_narrator`.
@@ -136,11 +139,15 @@ voice. Text-only scenes render as title cards (`media.card_clip` + serif centred
 GUI: newest project opens by itself, empty Scenes/Render tabs list projects, "Save and render video"
 button. Server reloads app/*.py by itself when they change (server.py itself still needs a restart).
 
-## State (2026-10-11 21:50)
+## State (2026-10-11 22:15, Kimi session)
 
 - Everything above works on this PC. Projects on disk: `smoke-test`, `chapter-test` (rendered),
   `test-lighthouse` (6-scene example, saved, not rendered: a good first test for Ole).
-- NOT tested yet: ACE-Step music, Stable Audio sfx, Wan 2.1, LTX text-to-video, own-voice upload,
+- Verified this session (Kimi): `factory.sh doctor` all OK; LTX text-to-video (16 s for 2 s clip);
+  Wan 2.1 text-to-video (120 s for 2 s clip, works but slow); own-voice upload flow
+  (reference WAV uploaded, cloned output verified different from generic voice).
+  First git commit made (repo had no commits before).
+- NOT tested yet: ACE-Step music, Stable Audio sfx (models not downloaded — Ole clicks in the GUI),
   GUI downloads/pulls, Windows launcher, a full 10-minute render (expect ~1.5-2.5 h on 8 GB).
 
 ## Next steps (when Ole asks)
