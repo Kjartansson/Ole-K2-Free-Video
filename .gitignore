@@ -10,3 +10,5 @@ sfx/*
 !sfx/README.txt
 __pycache__/
 *.pyc
+brand/*
+!brand/README.txt
