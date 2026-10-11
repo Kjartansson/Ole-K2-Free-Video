@@ -11,15 +11,31 @@ async function api(path, body, raw) {
   const r = await fetch(path, opt);
   let j = {};
   try { j = await r.json(); } catch (e) { j = { error: 'Bad answer from the server' }; }
-  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  if (!r.ok || j.error) {
+    const e = new Error(j.error || r.statusText);
+    Object.assign(e, { code: j.code, hint: j.hint, ref: j.ref });
+    throw e;
+  }
   return j;
 }
-function toast(msg, err) {
+function toast(msg, err, hint, ref) {
   const t = $('#toast');
-  t.textContent = msg; t.className = 'toast' + (err ? ' err' : '');
-  clearTimeout(t._h); t._h = setTimeout(() => t.classList.add('hidden'), err ? 7000 : 3000);
+  t.innerHTML = `<div>${esc(msg)}</div>` + (hint ? `<div class="hint">${esc(hint)}</div>` : '') +
+    (ref ? `<div class="row"><button class="small" data-copyref="${esc(ref)}">Copy error report</button>
+      <span class="muted small">ref ${esc(ref)}</span><button class="small ghost" data-close>Close</button></div>` : '');
+  t.className = 'toast' + (err ? ' err' : '');
+  const btn = $('[data-copyref]', t);
+  if (btn) btn.onclick = () => copyReport(btn.dataset.copyref);
+  const cl = $('[data-close]', t);
+  if (cl) cl.onclick = () => t.classList.add('hidden');
+  clearTimeout(t._h);
+  if (!ref) t._h = setTimeout(() => t.classList.add('hidden'), err ? (hint ? 12000 : 7000) : 3000);
 }
-const fail = e => toast(e.message || String(e), true);
+const fail = e => toast(e.message || String(e), true, e.hint, e.ref);
+async function copyReport(ref) {
+  try { const r = await api(`/api/errors/${encodeURIComponent(ref)}/report`); await copyText(r.text); toast('Error report copied. Paste it to Claude or Kimi.'); }
+  catch (e) { toast(e.message, true); }
+}
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
   catch (e) {
@@ -43,6 +59,20 @@ function showTab(name) {
   if (name === 'library') loadLibrary();
   if (name === 'models') loadModels();
   if (name === 'settings') fillSettings();
+  if (name === 'help') loadProblems();
+}
+async function loadProblems() {
+  let r;
+  try { r = await api('/api/errors?n=15'); } catch (e) { return; }
+  $('#problems').innerHTML = r.errors.length ? '<table class="tbl"><tr><th>When</th><th>Code</th><th>Where</th><th>What</th><th></th></tr>' +
+    r.errors.map(e => {
+      const c = e.ctx || {};
+      const where = [c.project, c.stage, c.shot, c.task, c.path].filter(Boolean).join(' · ');
+      return `<tr><td class="note">${esc((e.time || '').replace('T', ' ').slice(5, 16))}</td><td><b>${esc(e.code)}</b>${c.level === 'warning' ? ' <span class="muted small">(handled)</span>' : ''}</td>
+        <td class="note">${esc(where)}</td><td>${esc(e.message.slice(0, 160))}<div class="hint">${esc(e.hint)}</div></td>
+        <td><button class="small" data-copyref="${esc(e.ref)}">Copy report</button></td></tr>`;
+    }).join('') + '</table>' : '<p class="muted">No problems recorded.</p>';
+  $$('#problems [data-copyref]').forEach(b => b.onclick = () => copyReport(b.dataset.copyref));
 }
 $$('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $$('#srcSeg button').forEach(b => b.onclick = () => {
@@ -147,7 +177,10 @@ function watchTask(id, { box, stage, text, onDone, onFail }) {
     if (text) { text.textContent = t.text || ''; text.scrollTop = text.scrollHeight; }
     if (t.state === 'running') return setTimeout(tick, 700);
     if (t.state === 'done') onDone && onDone(t.result);
-    else { onFail ? onFail(new Error(t.error || t.state)) : fail(new Error(t.error || t.state)); }
+    else {
+      const e = Object.assign(new Error(t.error || t.state), { code: t.code, hint: t.hint, ref: t.ref });
+      onFail ? onFail(e) : fail(e);
+    }
   };
   tick();
 }
@@ -463,7 +496,12 @@ function showJob(j) {
   $('#jobMsg').textContent = j.state === 'running' ? `${j.message} · ${j.pct || 0}% · ${Math.round((Date.now() / 1000 - j.started) || 0)} s`
     : j.state === 'done' && j.preview ? 'Scene preview is ready (see the Scenes tab)'
     : j.message || '';
-  $('#jobWarn').innerHTML = (j.warnings || []).map(w => `<li>${esc(w)}</li>`).join('') + (j.error ? `<li>${esc(j.error)}</li>` : '');
+  $('#jobWarn').innerHTML = (j.warnings || []).map(w => `<li>${esc(w)}</li>`).join('') + (j.error ? `<li class="bad">
+    <b>${esc(j.code || 'Error')}</b>${j.where && j.where.shot ? ` in shot ${esc(j.where.shot)}` : ''}${j.where && j.where.stage ? ` (${esc(j.where.stage)})` : ''}: ${esc(j.error)}
+    ${j.hint ? `<div class="hint">${esc(j.hint)}</div>` : ''}
+    ${j.ref ? `<div class="row"><button class="small" data-copyref="${esc(j.ref)}">Copy error report</button>
+      <span class="muted small">ref ${esc(j.ref)}${j.detail_file ? ' · evidence: ' + esc(j.detail_file) : ''}</span></div>` : ''}</li>` : '');
+  $$('#jobWarn [data-copyref]').forEach(b => b.onclick = () => copyReport(b.dataset.copyref));
   $('#jobLog').textContent = j.log || '';
   $('#btnRender').disabled = j.state === 'running';
   $('#renderHint').textContent = j.state === 'running' ? 'You can switch tabs; it keeps going.' : '';
@@ -490,7 +528,10 @@ function watchJob(onDone) {
     if (S.proj.job.state === 'done') {
       if (S.proj.job.final) { toast('Video finished'); showResult(); loadProjects(); }
       onDone && onDone();
-    } else if (S.proj.job.state === 'error') fail(new Error(S.proj.job.error || 'Render failed'));
+    } else if (S.proj.job.state === 'error') {
+      const j = S.proj.job;
+      fail(Object.assign(new Error(j.error || 'Render failed'), { hint: j.hint, ref: j.ref }));
+    }
   };
   tick();
 }

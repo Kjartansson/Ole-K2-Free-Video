@@ -7,11 +7,16 @@ to `dest` and returns that path. The factory never downloads models by itself.
 import json
 import os
 import re
+import re
 import shutil
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+import errors
+from errors import FactoryError
 
 URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188")
 
@@ -42,8 +47,14 @@ def _req(path, data=None, timeout=30, method=None, raw=False):
     body = json.dumps(data).encode() if data is not None else None
     r = urllib.request.Request(URL + path, data=body, method=method,
                                headers={"Content-Type": "application/json"} if body else {})
-    with urllib.request.urlopen(r, timeout=timeout) as resp:
-        out = resp.read()
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            out = resp.read()
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        raise FactoryError("COMFY_DOWN", f"ComfyUI not reachable at {URL} ({getattr(e, 'reason', e)})",
+                           url=URL + path) from None
     if raw:
         return out
     return json.loads(out) if out else {}
@@ -61,15 +72,15 @@ def free_vram():
     """Unload ComfyUI's models so Ollama gets the GPU (small cards cannot hold both)."""
     try:
         _req("/free", {"unload_models": True, "free_memory": True}, timeout=10)
-    except Exception:
-        pass
+    except Exception as e:
+        errors.quiet("comfy", e, "free_vram")
 
 
 def interrupt():
     try:
         _req("/interrupt", {}, timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        errors.quiet("comfy", e, "interrupt")
 
 
 _OI = {}
@@ -145,13 +156,42 @@ def download(item, dest):
     return dest
 
 
+def _workflow_summary(workflow):
+    return ", ".join(sorted({n.get("class_type", "?") for n in workflow.values()}))
+
+
+def _refused(e, workflow):
+    """ComfyUI said 400 to /prompt: name the node and the input it did not like."""
+    raw = e.read().decode(errors="replace")
+    try:
+        js = json.loads(raw)
+    except ValueError:
+        js = {}
+    parts, code = [], "COMFY_REFUSED"
+    top = js.get("error") or {}
+    if top.get("type") in ("missing_node_type", "invalid_prompt") and "node" in str(top.get("message", "")).lower():
+        code = "NODE_MISSING"
+    for nid, ne in (js.get("node_errors") or {}).items():
+        for er in ne.get("errors", []):
+            inp = (er.get("extra_info") or {}).get("input_name", "")
+            got = (er.get("extra_info") or {}).get("received_value", "")
+            parts.append(f"{ne.get('class_type', '?')}.{inp}: {er.get('message', '')} {er.get('details', '')}".strip()
+                         + (f" (got {got!r})" if got != "" else ""))
+            if er.get("type") == "value_not_in_list" and inp.endswith("_name"):
+                code = "MODEL_MISSING"
+    msg = "; ".join(parts) or str(top.get("message") or raw[:300])
+    detail = errors.save_detail("comfy-refused", {"response": js or raw[:4000], "workflow": workflow})
+    raise FactoryError(code, f"ComfyUI refused the job: {msg[:600]}", detail_file=detail,
+                       nodes=_workflow_summary(workflow)) from None
+
+
 def run(workflow, timeout=900, on_tick=None):
-    """Queue a workflow, wait for it, return the list of output items."""
+    """Queue a workflow, wait for it, return the list of output items. Failures name the node and keep
+    the workflow + ComfyUI's traceback in logs/fail/ (detail_file)."""
     try:
         pid = _req("/prompt", {"prompt": workflow, "client_id": uuid.uuid4().hex})["prompt_id"]
     except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:600]
-        raise RuntimeError(f"ComfyUI refused the workflow: {detail}") from None
+        _refused(e, workflow)
     t0 = time.time()
     while True:
         h = _req(f"/history/{pid}", timeout=10).get(pid)
@@ -160,8 +200,14 @@ def run(workflow, timeout=900, on_tick=None):
             if st.get("status_str") == "error":
                 msgs = [m for m in st.get("messages", []) if m[0] == "execution_error"]
                 err = msgs[0][1] if msgs else {}
-                raise RuntimeError(f"ComfyUI error in {err.get('node_type', '?')}: "
-                                   f"{str(err.get('exception_message', 'unknown')).strip()[:300]}")
+                node = err.get("node_type", "?")
+                text = str(err.get("exception_message", "unknown")).strip()
+                detail = errors.save_detail("comfy-node", {
+                    "node_type": node, "node_id": err.get("node_id"), "exception_type": err.get("exception_type"),
+                    "exception_message": text, "traceback": err.get("traceback"), "workflow": workflow})
+                code = "GPU_OOM" if re.search(r"out of memory|OutOfMemory|Allocation on device", text, re.I) else \
+                    ("MODEL_MISSING" if re.search(r"No such file|not found|does not exist", text, re.I) else "COMFY_NODE")
+                raise FactoryError(code, f"ComfyUI node {node} failed: {text[:400]}", node=node, detail_file=detail)
             if st.get("completed") or h.get("outputs"):
                 items = []
                 for out in h.get("outputs", {}).values():
@@ -171,10 +217,12 @@ def run(workflow, timeout=900, on_tick=None):
                                       and it.get("type") == "output"]
                 if items:
                     return items
-                raise RuntimeError("ComfyUI finished without an output file")
+                detail = errors.save_detail("comfy-no-output", {"history": h, "workflow": workflow})
+                raise FactoryError("COMFY_NODE", "ComfyUI finished without an output file", detail_file=detail)
         if time.time() - t0 > timeout:
             interrupt()
-            raise RuntimeError(f"ComfyUI took longer than {timeout}s (interrupted)")
+            raise FactoryError("TIMEOUT", f"ComfyUI took longer than {timeout}s (stopped it)",
+                               nodes=_workflow_summary(workflow))
         if on_tick:
             on_tick(time.time() - t0)
         time.sleep(1.0)

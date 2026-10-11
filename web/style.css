@@ -98,6 +98,9 @@ button.danger { color: var(--bad); }
 .warnings { margin: 10px 0 0; padding: 0; list-style: none; }
 .warnings li { padding: 6px 10px; border-left: 3px solid var(--warn); background: #2a2210; margin-top: 4px; font-size: 12.5px; border-radius: 0 4px 4px 0; }
 .warnings li.good { border-color: var(--ok); background: #0f2a1f; }
+.warnings li.bad { border-color: var(--bad); background: #2e1414; }
+.hint { color: var(--text); opacity: .85; font-size: 12.5px; margin-top: 4px; }
+.toast .hint { margin-top: 6px; }
 .taskbox { margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .taskhead { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .taskbox pre { margin: 0; padding: 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; font: 12px/1.5 var(--mono); color: var(--muted); }

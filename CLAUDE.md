@@ -156,6 +156,29 @@ blocks, "ACT ONE"/"PART TWO" chapters, last-piece merge capped at max_words + 2.
 - NOT tested yet: ACE-Step music, Stable Audio sfx (models not downloaded — Ole clicks in the GUI),
   GUI downloads/pulls, Windows launcher, a full 10-minute render (expect ~1.5-2.5 h on 8 GB).
 
+## Debugging: how to find an error (agents read this first)
+
+1. `./factory.sh errors` lists recent errors, one line each: time, ref, code, component, where
+   (project / stage / scene / shot), message, evidence file. `./factory.sh errors --ref E2204-2bec`
+   shows one in full (traceback included).
+2. `./factory.sh report` writes ONE file (`logs/report-*.txt`): doctor table, recent errors, the 3
+   newest in full with their evidence, the last render log, ComfyUI log tail. Read only that file.
+3. Raw sources, if needed: `logs/errors.jsonl` (one JSON object per error: ref, code, hint, ctx,
+   traceback), `logs/fail/*` (evidence: the failing ffmpeg command + output to re-run, the ComfyUI
+   workflow + node traceback, the LLM's raw answer), `projects/<slug>/render.log` + `job.json` (state,
+   code, hint, ref, where), `logs/comfyui.log`, `logs/debug.log` (cleanup errors deliberately ignored).
+4. In the GUI: errors show code + hint + ref and a "Copy error report" button (the same text as
+   `GET /api/errors/<ref>/report`); Help tab > Recent problems.
+
+Codes (`app/errors.py` HINTS): COMFY_DOWN, COMFY_NODE, COMFY_REFUSED, GPU_OOM, MODEL_MISSING,
+NODE_MISSING, FFMPEG, OLLAMA_DOWN, LLM_OUTPUT, SCRIPT, OWN_MEDIA, DISK_FULL, DOWNLOAD, TIMEOUT, BUSY,
+CANCELLED, BAD_REQUEST, UNKNOWN. Code rules: raise `errors.FactoryError(code, message, **ctx)` with
+evidence in `errors.save_detail()`, never a bare RuntimeError; best-effort cleanup uses
+`errors.quiet()`, never `except: pass`. The pipeline retries a ComfyUI job once on GPU_OOM (after
+freeing VRAM) and on COMFY_DOWN (after ComfyUI answers again); handled fallbacks are recorded with
+`ctx.level = warning`. A render is "running" while the pid in its job.json is alive, whoever started it
+(GUI, another GUI, CLI); only one render runs at a time.
+
 ## Next steps (when Ole asks)
 
 1. Ole tests the GUI himself (START-HERE.md) and reports what to change.

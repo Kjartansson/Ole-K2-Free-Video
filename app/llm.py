@@ -6,9 +6,12 @@ so the GUI shows it being written), then a JSON storyboard forced by a JSON sche
 """
 import json
 import re
+import urllib.error
 import urllib.request
 
+import errors
 import scriptfmt
+from errors import FactoryError
 
 URL = "http://127.0.0.1:11434"
 
@@ -21,7 +24,31 @@ def configure(url):
 def _post(path, data, timeout=30):
     r = urllib.request.Request(URL + path, data=json.dumps(data).encode(),
                                headers={"Content-Type": "application/json"})
-    return urllib.request.urlopen(r, timeout=timeout)
+    try:
+        return urllib.request.urlopen(r, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:500]
+        if e.code == 404 or "not found" in body:
+            raise FactoryError("MODEL_MISSING", f"Ollama has no model {data.get('model')!r}: {body}",
+                               hint="Pull it on the Models tab, or pick another LLM.") from None
+        raise FactoryError("OLLAMA_DOWN" if e.code >= 500 else "LLM_OUTPUT", f"Ollama said {e.code}: {body}") from None
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        raise FactoryError("OLLAMA_DOWN", f"Ollama not reachable at {URL} ({getattr(e, 'reason', e)})") from None
+
+
+def _ollama_error(text):
+    if re.search(r"requires more system memory|out of memory|CUDA", text, re.I):
+        return FactoryError("GPU_OOM", f"Ollama: {text}", hint="This LLM is too big for this PC right now. Pick a "
+                            "smaller one on the Models tab, or close other programs.")
+    if "not found" in text:
+        return FactoryError("MODEL_MISSING", f"Ollama: {text}", hint="Pull the model on the Models tab.")
+    return FactoryError("LLM_OUTPUT", f"Ollama: {text}")
+
+
+def _unusable(what, raw, **ctx):
+    """The model answered, but not in a usable shape: keep its raw answer for whoever debugs it."""
+    detail = errors.save_detail("llm-output", raw or "(empty answer)")
+    return FactoryError("LLM_OUTPUT", what, detail_file=detail, **ctx)
 
 
 def alive():
@@ -56,8 +83,8 @@ def unload_all():
         with urllib.request.urlopen(URL + "/api/ps", timeout=5) as r:
             for m in json.loads(r.read()).get("models", []):
                 _post("/api/generate", {"model": m["name"], "keep_alive": 0}, timeout=30).read()
-    except Exception:
-        pass
+    except Exception as e:
+        errors.quiet("llm", e, "unload_all")
 
 
 def capabilities(model):
@@ -84,13 +111,13 @@ def pull(name, on_progress=None, should_stop=None):
     with _post("/api/pull", {"model": name, "stream": True}, timeout=60) as r:
         for line in r:
             if should_stop and should_stop():
-                raise RuntimeError("cancelled")
+                raise FactoryError("CANCELLED", "cancelled")
             try:
                 ev = json.loads(line)
             except ValueError:
                 continue
             if ev.get("error"):
-                raise RuntimeError(ev["error"])
+                raise _ollama_error(ev["error"])
             if on_progress:
                 on_progress(ev.get("completed", 0), ev.get("total", 0), ev.get("status", ""))
     return True
@@ -115,13 +142,13 @@ def chat(model, system, user, schema=None, on_text=None, should_stop=None, ctx=8
     with _post("/api/chat", body, timeout=timeout) as r:
         for line in r:
             if should_stop and should_stop():
-                raise RuntimeError("cancelled")
+                raise FactoryError("CANCELLED", "cancelled")
             try:
                 ev = json.loads(line)
             except ValueError:
                 continue
             if ev.get("error"):
-                raise RuntimeError(ev["error"])
+                raise _ollama_error(ev["error"])
             text += (ev.get("message") or {}).get("content", "")
             if on_text:
                 on_text(text)
@@ -275,12 +302,15 @@ def _to_script(raw):
     except ValueError:
         start, end = raw.find("{"), raw.rfind("}")
         if start < 0 or end <= start:
-            raise RuntimeError("The model did not return a storyboard. Try again or pick another LLM.")
-        js = json.loads(raw[start:end + 1])
+            raise _unusable("The model did not return a storyboard. Try again or pick another LLM.", raw)
+        try:
+            js = json.loads(raw[start:end + 1])
+        except ValueError:
+            raise _unusable("The model's storyboard is broken JSON. Try again or pick another LLM.", raw) from None
     sc = scriptfmt.from_json(js)
     _tidy(sc)
     if not sc["scenes"]:
-        raise RuntimeError("The model returned no scenes. Try again or pick a bigger LLM.")
+        raise _unusable("The model returned no scenes. Try again or pick a bigger LLM.", raw)
     return sc
 
 
@@ -377,7 +407,7 @@ def write_long(model, idea, seconds, genre="", narration="narrator", extra="", v
         if len(chs) >= chapters:
             break
     if not chs:
-        raise RuntimeError("The model did not return an outline. Try again or pick another LLM.")
+        raise _unusable("The model did not return an outline. Try again or pick another LLM.", raw)
     for c in chs:
         c["title"] = re.sub(r"^\s*(chapter|part|act)\s*\w*\s*[:.\-–]\s*", "", str(c.get("title", "")), flags=re.I).strip()
     per_secs = seconds / len(chs)
@@ -391,7 +421,7 @@ def write_long(model, idea, seconds, genre="", narration="narrator", extra="", v
     system = BOARD_SYSTEM.format(voices=vs)
     for k, c in enumerate(chs):
         if should_stop and should_stop():
-            raise RuntimeError("cancelled")
+            raise FactoryError("CANCELLED", "cancelled")
         if on_stage:
             on_stage(f"Writing chapter {k + 1}/{len(chs)}: {c.get('title', '')}")
         prev = [s for s in scenes if s["chapter"] == k - 1][-3:]
@@ -412,7 +442,8 @@ def write_long(model, idea, seconds, genre="", narration="narrator", extra="", v
             part = scriptfmt.from_json({"characters": ol.get("characters") or [],
                                         "scenes": json.loads(raw[raw.find("{"):raw.rfind("}") + 1]).get("scenes", [])})
         except ValueError:
-            raise RuntimeError(f"Chapter {k + 1} came back broken. Try again or pick another LLM.") from None
+            raise _unusable(f"Chapter {k + 1} came back broken. Try again or pick another LLM.", raw,
+                            chapter=k + 1) from None
         for s in part["scenes"]:
             s["chapter"] = k
             if narration == "none":
@@ -499,7 +530,7 @@ def _improve_long(model, sc, instruction, voices, on_text, should_stop, ctx, on_
     out = []
     for k, bl in enumerate(blocks, 1):
         if should_stop and should_stop():
-            raise RuntimeError("cancelled")
+            raise FactoryError("CANCELLED", "cancelled")
         if on_stage:
             on_stage(f"Improving block {k}/{len(blocks)}")
         mini = scriptfmt.empty()
@@ -536,7 +567,7 @@ def _convert_long(model, text, voices, on_text, should_stop, ctx, on_stage):
     chars = "; ".join(f"{c['name']} = {c['look']}" for c in head["characters"]) or "none"
     for k, part in enumerate(parts[1:], 2):
         if should_stop and should_stop():
-            raise RuntimeError("cancelled")
+            raise FactoryError("CANCELLED", "cancelled")
         if on_stage:
             on_stage(f"Converting part {k}/{len(parts)}")
         so_far = " ".join(_scene_line(s) for s in head["scenes"] if s["voice"])[-1500:]
@@ -547,7 +578,7 @@ def _convert_long(model, text, voices, on_text, should_stop, ctx, on_stage):
             got = scriptfmt.from_json({"characters": head["characters"],
                                        "scenes": json.loads(raw[raw.find("{"):raw.rfind("}") + 1]).get("scenes", [])})
         except ValueError:
-            raise RuntimeError(f"Part {k} came back broken. Try again or pick another LLM.") from None
+            raise _unusable(f"Part {k} came back broken. Try again or pick another LLM.", raw, part=k) from None
         head["chapters"].append({"title": "", "music": ""})
         for s in got["scenes"]:
             s["chapter"] = len(head["chapters"]) - 1

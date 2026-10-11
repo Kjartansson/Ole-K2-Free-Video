@@ -7,7 +7,9 @@ import re
 import shutil
 import subprocess
 
+import errors
 from config import MUSIC_DIR, SFX_DIR
+from errors import FactoryError
 
 W, H, FPS = 1080, 1920, 30
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
@@ -16,15 +18,32 @@ LOG = None          # file object set by the pipeline; ffmpeg stderr goes there
 
 
 def run(args, timeout=900):
+    """Run ffmpeg. On failure the exact command and ffmpeg's output are saved to logs/fail/ and the
+    FactoryError points to that file (detail_file), so a person or an agent can re-run it."""
     cmd = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y"] + [str(a) for a in args]
     if LOG:
         LOG.write("$ ffmpeg " + " ".join(str(a) for a in args)[:2000] + "\n")
         LOG.flush()
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise FactoryError("FFMPEG", "ffmpeg is not installed", hint="Install ffmpeg (see INSTALL.md).") from None
+    except subprocess.TimeoutExpired:
+        detail = errors.save_detail("ffmpeg-timeout", "$ " + " ".join(cmd))
+        raise FactoryError("TIMEOUT", f"ffmpeg ran longer than {timeout}s", detail_file=detail) from None
     if p.returncode != 0:
         if LOG:
             LOG.write(p.stderr[-4000:] + "\n")
-        raise RuntimeError("ffmpeg failed: " + (p.stderr.strip().splitlines() or ["?"])[-1][:300])
+        detail = errors.save_detail("ffmpeg", "COMMAND (re-run it to reproduce):\n" + " ".join(
+            _shell_quote(c) for c in cmd) + f"\n\nEXIT CODE {p.returncode}\n\nFFMPEG OUTPUT:\n" + p.stderr[-12000:])
+        last = (p.stderr.strip().splitlines() or ["?"])[-1][:300]
+        code = "DISK_FULL" if "No space left" in p.stderr else "FFMPEG"
+        raise FactoryError(code, f"ffmpeg failed: {last}", detail_file=detail,
+                           output=os.path.basename(str(args[-1])) if args else "")
+
+
+def _shell_quote(c):
+    return c if re.fullmatch(r"[\w@%+=:,./\-]+", c) else "'" + c.replace("'", "'\\''") + "'"
 
 
 def duration(path):
@@ -488,7 +507,8 @@ def fit_music(src, seconds, dest):
 def file_music(name, seconds, dest):
     files = music_files()
     if not files:
-        raise RuntimeError("No music files in the music/ folder")
+        raise FactoryError("BAD_REQUEST", "No music files in the music/ folder",
+                           hint="Add music on Settings > Sound and text, or pick the built-in music.")
     pick = name if name in files else random.choice(files)
     run(["-stream_loop", "-1", "-i", os.path.join(MUSIC_DIR, pick), "-t", f"{seconds:.3f}", "-af",
          f"aresample=48000,afade=t=in:d=1,afade=t=out:st={max(0, seconds - 2.5):.2f}:d=2.5", "-ac", "2", dest])

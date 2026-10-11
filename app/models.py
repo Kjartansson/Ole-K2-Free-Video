@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 
 import config
+from errors import FactoryError
 
 HF = "https://huggingface.co"
 
@@ -126,7 +127,7 @@ def download(url, dest, token="", on_progress=None, should_stop=None):
             os.replace(part, dest)
             return dest
         if e.code in (401, 403):
-            raise RuntimeError("This model needs a Hugging Face login: accept its license on huggingface.co "
+            raise FactoryError("DOWNLOAD", "This model needs a Hugging Face login: accept its license on huggingface.co "
                                "and put your token in Settings.") from None
         raise
     with resp:
@@ -138,7 +139,7 @@ def download(url, dest, token="", on_progress=None, should_stop=None):
         with open(part, mode) as f:
             while True:
                 if should_stop and should_stop():
-                    raise RuntimeError("cancelled (the part file is kept, Download resumes)")
+                    raise FactoryError("CANCELLED", "cancelled (the part file is kept, Download resumes)")
                 chunk = resp.read(1 << 20)
                 if not chunk:
                     break
@@ -149,7 +150,7 @@ def download(url, dest, token="", on_progress=None, should_stop=None):
                     last = now
                     on_progress(done, total, (done - have) / max(0.1, now - t0))
     if total and os.path.getsize(part) < total:
-        raise RuntimeError("download stopped early (click Download again to resume)")
+        raise FactoryError("DOWNLOAD", "download stopped early (click Download again to resume)")
     os.replace(part, dest)
     return dest
 
@@ -157,7 +158,7 @@ def download(url, dest, token="", on_progress=None, should_stop=None):
 def download_entry(entry, token="", on_progress=None, should_stop=None):
     base = comfy_models_dir()
     if not base:
-        raise RuntimeError("No local ComfyUI folder found. Set it in Settings (models go into its models/ folder). "
+        raise FactoryError("MODEL_MISSING", "No local ComfyUI folder found. Set it in Settings (models go into its models/ folder). "
                            "If ComfyUI runs on another PC, download the model there.")
     url = f"{HF}/{entry['repo']}/resolve/main/{urllib.parse.quote(entry['path'])}"
     dest = os.path.join(base, entry["folder"], entry["file"])
@@ -171,7 +172,7 @@ def download_entry(entry, token="", on_progress=None, should_stop=None):
         got = sha256_file(dest + ".dl", should_stop)
         if got != want:
             os.remove(dest + ".dl")
-            raise RuntimeError("Checksum mismatch: the download was damaged and was removed. Try again.")
+            raise FactoryError("DOWNLOAD", "Checksum mismatch: the download was damaged and was removed. Try again.")
     os.replace(dest + ".dl", dest)
     return dest
 
@@ -198,7 +199,7 @@ def sha256_file(path, should_stop=None):
     with open(path, "rb") as f:
         while True:
             if should_stop and should_stop():
-                raise RuntimeError("cancelled")
+                raise FactoryError("CANCELLED", "cancelled")
             b = f.read(8 << 20)
             if not b:
                 break
@@ -210,16 +211,16 @@ def custom_entry(url, folder, filename=""):
     """Any Hugging Face file link (…/blob/main/… or …/resolve/main/…) -> a catalog-like entry."""
     u = url.strip()
     if not u.startswith(HF + "/"):
-        raise RuntimeError("Paste a https://huggingface.co/... file link")
+        raise FactoryError("BAD_REQUEST", "Paste a https://huggingface.co/... file link")
     u = u.replace("/blob/", "/resolve/").split("?")[0]
     parts = u[len(HF) + 1:].split("/")
     if "resolve" not in parts:
-        raise RuntimeError("The link must point to one file (…/resolve/main/<file>)")
+        raise FactoryError("BAD_REQUEST", "The link must point to one file (…/resolve/main/<file>)")
     i = parts.index("resolve")
     repo, path = "/".join(parts[:i]), "/".join(parts[i + 2:])
     allowed = {"checkpoints", "diffusion_models", "text_encoders", "vae", "loras", "upscale_models", "clip_vision"}
     if folder not in allowed:
-        raise RuntimeError("Pick a model folder")
+        raise FactoryError("BAD_REQUEST", "Pick a model folder")
     return {"id": _id(repo, path), "repo": repo, "path": urllib.parse.unquote(path), "folder": folder,
             "file": filename.strip() or os.path.basename(urllib.parse.unquote(path)), "label": os.path.basename(path)}
 

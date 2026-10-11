@@ -387,6 +387,13 @@
 ./factory.sh                               # start the GUI</pre>
     <p class="muted">Nothing here uses the cloud. Nothing is posted automatically.</p>
   </div>
+  <div class="card">
+    <h3>Recent problems</h3>
+    <p class="muted small">Every error is kept in <code>logs/errors.jsonl</code> with a ref, a code and a hint. <b>Copy report</b>
+      gives everything needed to fix it (paste it to Claude or Kimi). In a terminal: <code>./factory.sh errors</code> or
+      <code>./factory.sh report</code>.</p>
+    <div id="problems"></div>
+  </div>
 </section>
 </main>
 

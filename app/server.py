@@ -21,12 +21,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comfy      # noqa: E402
 import config     # noqa: E402
+import errors     # noqa: E402
 import llm        # noqa: E402
 import media      # noqa: E402
 import models     # noqa: E402
 import pipeline   # noqa: E402
 import projects   # noqa: E402
 import scriptfmt  # noqa: E402
+from errors import FactoryError  # noqa: E402
 
 FILE_ROOTS = {"projects": config.PROJECTS_DIR, "exports": config.EXPORTS_DIR, "music": config.MUSIC_DIR,
               "sfx": config.SFX_DIR, "voices": config.VOICES_DIR,
@@ -45,7 +47,7 @@ def maybe_reload():
     """Pick up updated app/*.py without restarting (the GUI keeps running while the factory is improved)."""
     global _MODS, _MTIME
     if _MODS is None:
-        _MODS = [config, scriptfmt, comfy, llm, media, projects, models, pipeline]
+        _MODS = [config, errors, scriptfmt, comfy, llm, media, projects, models, pipeline]
     app = os.path.join(config.ROOT, "app")
     newest = max(os.path.getmtime(os.path.join(app, f)) for f in os.listdir(app)
                  if f.endswith(".py") and f != "server.py")
@@ -77,10 +79,12 @@ def start_task(kind, fn, label=""):
             t["result"] = fn(t)
             t["state"] = "done"
         except Exception as e:
-            t["state"] = "cancelled" if t["cancel"] else "error"
-            t["error"] = str(e)[:600]
-            with open(os.path.join(config.LOGS_DIR, "server.log"), "a") as f:
-                f.write(f"--- task {kind} {label}\n{traceback.format_exc()}\n")
+            if t["cancel"] or errors.classify(e) == "CANCELLED":
+                t["state"], t["error"] = "cancelled", "Stopped"
+            else:
+                entry = errors.record(e, f"task:{kind}", task=label)
+                t.update(state="error", error=str(e)[:600], code=entry["code"], hint=entry["hint"], ref=entry["ref"],
+                         detail_file=entry["ctx"].get("detail_file", ""))
         t["finished"] = time.time()
     threading.Thread(target=runner, daemon=True).start()
     return tid
@@ -90,9 +94,50 @@ def task_view(t):
     return {k: v for k, v in t.items() if k != "cancel"}
 
 
-def gpu_busy():
+def pid_alive(pid):
+    """Is this render process still running? (renders outlive a restarted GUI or come from the CLI)"""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.path.exists("/proc"):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmd = f.read()
+            return b"pipeline" in cmd or b"factory.py" in cmd
+        except OSError:
+            return False
+    if platform.system() == "Windows":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def running_render():
+    """Slug of any render running right now, started by this GUI, another one, or the command line."""
     p = RENDER["proc"]
-    return p is not None and p.poll() is None
+    if p is not None and p.poll() is None:
+        return RENDER["slug"]
+    for d in os.listdir(config.PROJECTS_DIR):
+        if d.startswith("."):
+            continue
+        try:
+            j = projects.job(d)
+        except ValueError:
+            continue
+        if j.get("state") == "running" and pid_alive(j.get("pid")):
+            return d
+    return None
+
+
+def gpu_busy():
+    return running_render() is not None
 
 
 def busy_tasks():
@@ -102,10 +147,11 @@ def busy_tasks():
 # ------------------------------------------------------------------ render process
 def start_render(slug, scene=None):
     with LOCK:
-        if gpu_busy():
-            raise RuntimeError(f"Already rendering '{RENDER['slug']}'. Wait for it or cancel it.")
+        busy = running_render()
+        if busy:
+            raise FactoryError("BUSY", f"Already rendering '{busy}'. Wait for it or cancel it.")
         if any(t["kind"] in ("llm", "voice") and t["state"] == "running" for t in TASKS.values()):
-            raise RuntimeError("The local AI is still writing. Wait until it has finished.")
+            raise FactoryError("BUSY", "The local AI is still writing. Wait until it has finished.")
         args = [sys.executable, os.path.join(config.ROOT, "app", "pipeline.py"), "render", slug]
         if scene:
             args += ["--scene", str(int(scene))]
@@ -127,6 +173,14 @@ def cancel_render(slug):
             p.wait(15)
         except subprocess.TimeoutExpired:
             p.kill()
+    else:
+        j = projects.job(slug)                 # a render this GUI did not start (restarted GUI, CLI)
+        if j.get("state") == "running" and pid_alive(j.get("pid")):
+            try:
+                os.kill(int(j["pid"]), 15)
+            except OSError as e:
+                errors.quiet("server", e, "cancel foreign render")
+            comfy.interrupt()
     j = projects.job(slug)
     if j.get("state") == "running":
         j.update(state="cancelled", message="Cancelled")
@@ -137,9 +191,10 @@ def cancel_render(slug):
 def job_of(slug):
     j = projects.job(slug)
     if j.get("state") == "running":
-        alive = RENDER["slug"] == slug and gpu_busy()
-        if not alive and time.time() - j.get("updated", 0) > 20:
-            j.update(state="stopped", message="The render stopped (the program was closed?). Start it again.")
+        mine = RENDER["slug"] == slug and RENDER["proc"] is not None and RENDER["proc"].poll() is None
+        if not mine and not pid_alive(j.get("pid")) and time.time() - j.get("updated", 0) > 30:
+            j.update(state="stopped", message="The render stopped (the program was closed?). Render again: "
+                                              "finished parts are reused.")
     try:
         with open(projects.path(slug, "render.log"), encoding="utf-8", errors="replace") as f:
             f.seek(0, 2)
@@ -184,8 +239,34 @@ def status():
     s = config.load_settings()
     comfy.configure(s["comfy_url"])
     llm.configure(s["ollama_url"])
-    return {"comfy": comfy.alive(), "ollama": llm.alive(), "rendering": RENDER["slug"] if gpu_busy() else None,
+    return {"comfy": comfy.alive(), "ollama": llm.alive(), "rendering": running_render(),
             "tasks": busy_tasks()}
+
+
+def error_report(ref):
+    """Text to paste into Claude / Kimi: the error, its traceback, the evidence file and the log tail."""
+    found = errors.recent(500, ref=ref)
+    if not found:
+        raise FactoryError("BAD_REQUEST", f"No error {ref} in logs/errors.jsonl")
+    e = found[0]
+    c = e.get("ctx") or {}
+    out = [f"Ole-K2-Free-Video error report {ref}  (folder {config.ROOT})",
+           f"code: {e['code']}   component: {e['component']}   time: {e['time']}",
+           f"message: {e['message']}", f"hint: {e['hint']}",
+           "where: " + json.dumps(c, default=str), "", "TRACEBACK", e.get("traceback", "")]
+    if c.get("detail_file"):
+        try:
+            with open(os.path.join(config.ROOT, c["detail_file"]), encoding="utf-8", errors="replace") as f:
+                out += ["", f"DETAIL FILE {c['detail_file']} (first 4000 chars)", f.read(4000)]
+        except OSError:
+            pass
+    if c.get("project"):
+        try:
+            with open(projects.path(c["project"], "render.log"), encoding="utf-8", errors="replace") as f:
+                out += ["", f"RENDER LOG projects/{c['project']}/render.log (last 30 lines)"] + f.read().splitlines()[-30:]
+        except (OSError, ValueError):
+            pass
+    return "\n".join(out)
 
 
 def project_view(slug):
@@ -207,15 +288,15 @@ def _llm_model(body):
     hw = config.hardware(s)
     m = body.get("model") or llm.pick_model(s.get("llm"), hw["vram_gb"])
     if not m:
-        raise RuntimeError("No local LLM installed. Pull one on the Models tab (e.g. qwen2.5:7b).")
+        raise FactoryError("MODEL_MISSING", "No local LLM installed. Pull one on the Models tab (e.g. qwen2.5:7b).")
     return m, int(s.get("llm_ctx", 8192))
 
 
 def llm_task(kind, body):
     if gpu_busy():
-        raise RuntimeError("A video is rendering and needs the graphics card. Wait for it or cancel it first.")
+        raise FactoryError("BUSY", "A video is rendering and needs the graphics card. Wait for it or cancel it first.")
     if not llm.alive():
-        raise RuntimeError("Ollama is not running. Start it (factory.sh tries) or fix its address in Settings.")
+        raise FactoryError("OLLAMA_DOWN", "Ollama is not running. Start it (factory.sh tries) or fix its address in Settings.")
     model, ctx = _llm_model(body)
     voices = sorted(comfy.voices()) or sorted(comfy.FALLBACK_VOICES)
 
@@ -244,10 +325,10 @@ def llm_task(kind, body):
 
 def voice_preview(body):
     if gpu_busy():
-        raise RuntimeError("A video is rendering; try the voice preview afterwards.")
+        raise FactoryError("BUSY", "A video is rendering; try the voice preview afterwards.")
     s = apply_settings()
     if not comfy.alive():
-        raise RuntimeError("ComfyUI is not running.")
+        raise FactoryError("COMFY_DOWN", "ComfyUI is not running.")
     name = body.get("voice") or s["voice"]
     text = (body.get("text") or "Hello! This is how I sound in your next video.")[:300]
 
@@ -432,12 +513,17 @@ class Handler(BaseHTTPRequestHandler):
             if out is None:
                 return self._json({"error": "not found"}, 404)
             return self._json(out)
+        except FactoryError as e:
+            body = {"error": str(e), "code": e.code, "hint": e.hint}
+            if e.code not in ("BUSY", "BAD_REQUEST", "CANCELLED"):
+                body["ref"] = errors.record(e, "api", path=p)["ref"]
+            return self._json(body, 400)
         except (RuntimeError, ValueError, KeyError) as e:
-            return self._json({"error": str(e)}, 400)
+            return self._json({"error": str(e), "code": "BAD_REQUEST", "hint": ""}, 400)
         except Exception as e:
-            with open(os.path.join(config.LOGS_DIR, "server.log"), "a") as f:
-                f.write(f"--- {method} {p}\n{traceback.format_exc()}\n")
-            return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            entry = errors.record(e, "api", path=p, method=method)
+            return self._json({"error": f"{type(e).__name__}: {e}", "code": entry["code"], "hint": entry["hint"],
+                               "ref": entry["ref"]}, 500)
 
     def _api(self, method, p, q):
         G, P = method == "GET", method == "POST"
@@ -445,6 +531,11 @@ class Handler(BaseHTTPRequestHandler):
             return status()
         if G and p == "/api/info":
             return info()
+        if G and p == "/api/errors":
+            return {"errors": [errors.public(e) for e in errors.recent(int(q.get("n", 20)))]}
+        m = re.fullmatch(r"/api/errors/(E[\w-]+)/report", p)
+        if G and m:
+            return {"text": error_report(m.group(1))}
         if P and p == "/api/settings":
             body = self._body()
             if body.get("hf_token") == "********":
@@ -562,7 +653,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": True}
         if action == "trash":
             if RENDER["slug"] == slug and gpu_busy():
-                raise RuntimeError("Cancel the render first")
+                raise FactoryError("BUSY", "Cancel the render first")
             projects.trash(slug)
             return {"ok": True}
         if action == "posted":

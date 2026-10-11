@@ -161,7 +161,8 @@ def cmd_write(a):
     say(f"Saved: {out}\nNext:  ./factory.sh make {out}")
 
 
-def cmd_doctor(a):
+def doctor_text():
+    """The doctor table as text (also part of `report`)."""
     s = config.load_settings()
     rows = []
 
@@ -199,11 +200,78 @@ def cmd_doctor(a):
         "NVIDIA card + driver recommended")
     rec = config.recommended(hw["vram_gb"], hw["ram_gb"])
     w = max(len(r[1]) for r in rows)
-    say("")
+    out = [""]
     for st, name, detail, fix in rows:
-        say(f" {st} {name.ljust(w)}  {detail}" + (f"\n      -> {fix}" if fix else ""))
-    say(f"\n Suggested for this PC: quality '{rec['quality']}', engine '{rec['engine']}', "
-        f"LLMs up to ~{rec['llm_max_gb']} GB.\n")
+        out.append(f" {st} {name.ljust(w)}  {detail}" + (f"\n      -> {fix}" if fix else ""))
+    out.append(f"\n Suggested for this PC: quality '{rec['quality']}', engine '{rec['engine']}', "
+               f"LLMs up to ~{rec['llm_max_gb']} GB.\n")
+    return "\n".join(out)
+
+
+def cmd_doctor(a):
+    say(doctor_text())
+
+
+def cmd_errors(a):
+    """Compact list of recent errors (newest first). --ref shows one in full."""
+    import errors
+    if a.ref:
+        found = errors.recent(1000, ref=a.ref)
+        if not found:
+            sys.exit(f"No error {a.ref} in logs/errors.jsonl")
+        import json
+        say(json.dumps(found[0], indent=1, default=str))
+        return
+    items = errors.recent(a.n)
+    if not items:
+        say("No errors recorded (logs/errors.jsonl is empty).")
+        return
+    for e in items:
+        say(errors.one_line(e))
+    say(f"\nFull entry: ./factory.sh errors --ref <ref>     Everything in one file: ./factory.sh report")
+
+
+def _tail(path, n):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read().splitlines()[-n:]
+    except OSError:
+        return [f"({os.path.relpath(path, ROOT)} not found)"]
+
+
+def cmd_report(a):
+    """One file with everything an agent (Claude, Kimi) needs to find a problem: read only this file."""
+    import datetime
+    import errors
+    import projects
+    out = [f"Ole-K2-Free-Video report {datetime.datetime.now():%Y-%m-%d %H:%M}  folder {ROOT}",
+           f"git: {subprocess.run(['git', '-C', ROOT, 'log', '-1', '--format=%h %s'], capture_output=True, text=True).stdout.strip()}",
+           "", "== DOCTOR", doctor_text(), "== RECENT ERRORS (newest first)"]
+    items = errors.recent(20)
+    out += [errors.one_line(e) for e in items] or ["(none)"]
+    for e in items[:3]:
+        out += ["", f"== ERROR {e['ref']} IN FULL", f"code {e['code']} | {e['component']} | {e['time']}",
+                f"message: {e['message']}", f"hint: {e['hint']}", f"ctx: {e.get('ctx')}", e.get("traceback", "")]
+        det = (e.get("ctx") or {}).get("detail_file")
+        if det:
+            try:
+                with open(os.path.join(ROOT, det), encoding="utf-8", errors="replace") as f:
+                    out += [f"-- detail file {det} (first 3000 chars)", f.read(3000)]
+            except OSError:
+                pass
+    projs = projects.all_projects()
+    if projs:
+        p = max(projs, key=lambda x: os.path.getmtime(projects.path(x["slug"], "job.json"))
+                if os.path.exists(projects.path(x["slug"], "job.json")) else 0)
+        out += ["", f"== LAST RENDER: projects/{p['slug']} job={projects.job(p['slug'])}",
+                *[l for l in _tail(projects.path(p["slug"], "render.log"), 80) if not l.startswith("$ ffmpeg")][-40:]]
+    out += ["", "== logs/comfyui.log (last 40 lines)", *_tail(os.path.join(config.LOGS_DIR, "comfyui.log"), 40),
+            "", "== logs/debug.log (ignored cleanup errors, last 15)", *_tail(errors.DEBUG_LOG, 15)]
+    path = os.path.join(config.LOGS_DIR, f"report-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(str(x) for x in out) + "\n")
+    say(f"Report written: {os.path.relpath(path, ROOT)}  ({len(items)} recent errors)")
+    say("Give this ONE file to Claude or Kimi: 'read only this file and find the problem'.")
 
 
 def cmd_shortcut(a):
@@ -251,9 +319,14 @@ def main():
     w.add_argument("--extra", default="")
     w.add_argument("--model", default="")
     sub.add_parser("doctor", help="check what is installed")
+    er = sub.add_parser("errors", help="list recent errors (logs/errors.jsonl)")
+    er.add_argument("-n", type=int, default=15)
+    er.add_argument("--ref", default="", help="show one error in full")
+    sub.add_parser("report", help="write one file with everything needed to debug a problem")
     sub.add_parser("shortcut", help="add an app-menu launcher (Linux)")
     a = ap.parse_args()
-    {"make": cmd_make, "write": cmd_write, "doctor": cmd_doctor, "shortcut": cmd_shortcut}.get(a.cmd, cmd_gui)(a)
+    {"make": cmd_make, "write": cmd_write, "doctor": cmd_doctor, "errors": cmd_errors, "report": cmd_report,
+     "shortcut": cmd_shortcut}.get(a.cmd, cmd_gui)(a)
 
 
 if __name__ == "__main__":

@@ -23,10 +23,12 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comfy      # noqa: E402
 import config     # noqa: E402
+import errors     # noqa: E402
 import llm        # noqa: E402
 import media      # noqa: E402
 import projects   # noqa: E402
 import scriptfmt  # noqa: E402
+from errors import FactoryError  # noqa: E402
 
 LEAD, TAIL = 0.15, 0.35        # silence before / after each voice line
 STAGES = [("voice", 15), ("image", 25), ("video", 35), ("clip", 10), ("sound", 5), ("final", 10)]
@@ -45,7 +47,14 @@ class Job:
                       "started": time.time(), "updated": time.time(), "warnings": []}
         self.weights = dict(STAGES)
         self.done_weight = 0
+        self.where = {"stage": "starting"}      # project/stage/scene/shot for error reports
         self.write()
+
+    def at(self, sh=None, **kw):
+        self.where = {"stage": self.state.get("stage")}
+        if sh:
+            self.where.update(scene=sh.get("scene"), shot=sh.get("id"))
+        self.where.update(kw)
 
     def write(self):
         self.state["updated"] = time.time()
@@ -54,6 +63,7 @@ class Job:
         os.replace(self.file + ".tmp", self.file)
 
     def stage(self, name, message):
+        self.where = {"stage": name}
         if self.state["stage"] in self.weights and self.state["stage"] != name:
             self.done_weight += self.weights[self.state["stage"]]
         self.state.update(stage=name, message=message, pct=round(self.done_weight))
@@ -64,9 +74,12 @@ class Job:
         self.state.update(message=message, pct=round(self.done_weight + w * i / max(1, n)))
         self.write()
 
-    def warn(self, text):
+    def warn(self, text, exc=None):
         self.state["warnings"].append(text)
         log(f"WARNING: {text}")
+        if exc is not None:      # a handled failure (fallback used): still on record for whoever debugs
+            e = errors.record(exc, "render", level="warning", project=self.slug, **self.where)
+            log(f"  (recorded as {e['ref']} {e['code']})")
         self.write()
 
     def finish(self, state, **kw):
@@ -263,13 +276,50 @@ def render(slug, only_scene=None):
         comfy.interrupt()
         job.finish("cancelled", message="Cancelled")
         log("CANCELLED")
+    except FactoryError as e:
+        if e.code == "CANCELLED":
+            job.finish("cancelled", message="Cancelled")
+            log("CANCELLED")
+            return
+        _fail(job, e)
     except Exception as e:
         log(traceback.format_exc())
-        job.finish("error", message=str(e)[:500], error=str(e)[:500])
-        log(f"ERROR {e}")
-        raise SystemExit(1)
+        _fail(job, e)
     finally:
         LOGF.close()
+
+
+def _fail(job, e):
+    """Record the error (logs/errors.jsonl), show code + hint + ref in the GUI, exit non-zero."""
+    entry = errors.record(e, "render", project=job.slug, **job.where)
+    log(f"ERROR [{entry['code']}] ref {entry['ref']} at {job.where}: {e}")
+    if entry["ctx"].get("detail_file"):
+        log(f"  detail: {entry['ctx']['detail_file']}")
+    log(f"  hint: {entry['hint']}")
+    job.finish("error", message=str(e)[:500], error=str(e)[:500], code=entry["code"], hint=entry["hint"],
+               ref=entry["ref"], where=job.where, detail_file=entry["ctx"].get("detail_file", ""))
+    raise SystemExit(1)
+
+
+def _gpu(job, fn, *args, **kw):
+    """Run one ComfyUI job; retry once after freeing the GPU (out of memory) or after ComfyUI is back
+    (connection dropped). Anything else is raised with the job's location attached."""
+    for attempt in (1, 2):
+        try:
+            return fn(*args, **kw)
+        except FactoryError as e:
+            if attempt == 2 or e.code not in ("GPU_OOM", "COMFY_DOWN"):
+                raise
+            job.warn(f"{e.code} at {job.where.get('shot') or job.where.get('stage')}: retrying once", e)
+            if e.code == "GPU_OOM":
+                comfy.free_vram()
+                llm.unload_all()
+                time.sleep(3)
+            else:
+                for _ in range(15):
+                    if comfy.alive():
+                        break
+                    time.sleep(2)
 
 
 def _render(slug, pdir, work, job, only_scene):
@@ -278,7 +328,7 @@ def _render(slug, pdir, work, job, only_scene):
     o = resolve_options(meta, settings)
     sc = scriptfmt.parse(projects.load_script(slug))
     if not sc["scenes"]:
-        raise RuntimeError("The script has no scenes. Check it on the Story tab.")
+        raise FactoryError("SCRIPT", "The script has no scenes. Check it on the Story tab.")
     comfy.configure(o["comfy_url"])
     llm.configure(o["ollama_url"])
     cache = Cache(work)
@@ -288,7 +338,7 @@ def _render(slug, pdir, work, job, only_scene):
     cap, cap_s, max_words = limits(hw)
     n_scenes = len(sc["scenes"])
     if only_scene and not 1 <= only_scene <= n_scenes:
-        raise RuntimeError(f"There is no scene {only_scene}")
+        raise FactoryError("SCRIPT", f"There is no scene {only_scene}")
     sopt = lambda i: meta["scenes"].get(str(i)) or {}          # noqa: E731
 
     def engine_of(i):
@@ -310,21 +360,21 @@ def _render(slug, pdir, work, job, only_scene):
     needs_comfy = bool(engines - {"own", "card"}) or any(sh["voice"] for sh in todo)
     if needs_comfy:
         if not comfy.alive():
-            raise RuntimeError(f"ComfyUI is not running at {o['comfy_url']}. Start the factory with factory.sh "
+            raise FactoryError("COMFY_DOWN", f"ComfyUI is not running at {o['comfy_url']}. Start the factory with factory.sh "
                                "(it starts ComfyUI) or fix the address in Settings.")
         llm.unload_all()      # hand the GPU to ComfyUI
     img_ckpt = vid_ckpt = ""
     if engines & {"still", "ltx_i2v"}:
         img_ckpt = first_model("checkpoints", o.get("image_model"), lambda f: not any(x in f for x in NON_IMAGE_CKPT))
         if not img_ckpt:
-            raise RuntimeError("No image model (SDXL) found. Download 'SDXL base 1.0' on the Models tab.")
+            raise FactoryError("MODEL_MISSING", "No image model (SDXL) found. Download 'SDXL base 1.0' on the Models tab.")
     if engines & {"ltx_i2v", "ltx_t2v"}:
         vid_ckpt = first_model("checkpoints", o.get("video_model"), lambda f: "ltx" in f and "upscal" not in f)
         if not vid_ckpt or "t5xxl_fp8_e4m3fn_scaled.safetensors" not in comfy.models("text_encoders"):
-            raise RuntimeError("LTX video model or its T5 text encoder is missing. Download both on the Models tab, "
+            raise FactoryError("MODEL_MISSING", "LTX video model or its T5 text encoder is missing. Download both on the Models tab, "
                                "or pick the 'Image + camera move' engine.")
     if "wan" in engines and "wan2.1_t2v_1.3B_fp16.safetensors" not in comfy.models("diffusion_models"):
-        raise RuntimeError("Wan 2.1 is not downloaded (Models tab).")
+        raise FactoryError("MODEL_MISSING", "Wan 2.1 is not downloaded (Models tab).")
     W = lambda name: os.path.join(work, name)                 # noqa: E731
 
     # ---- 1. voices (they set each shot's length)
@@ -338,7 +388,7 @@ def _render(slug, pdir, work, job, only_scene):
         narrator = o["own_voice"]
     with_voice = [sh for sh in todo if sh["voice"]]
     if with_voice and needs_comfy and not comfy.has_node("UnifiedTTSTextNode"):
-        raise RuntimeError("The TTS-Audio-Suite node pack is missing in ComfyUI (needed for voices).")
+        raise FactoryError("NODE_MISSING", "The TTS-Audio-Suite node pack is missing in ComfyUI (needed for voices).")
     for k, sh in enumerate(with_voice):
         who = (char_voice.get(sh["speaker"].lower(), "") or sh["speaker"]) if sh["speaker"] else ""
         if who == "own":
@@ -351,10 +401,11 @@ def _render(slug, pdir, work, job, only_scene):
         key = _key(sh["voice"], vpath, file_sig(own) if own else "", o["voice_language"], o["voice_emotion"],
                    o["voice_speed"], sh["seed"])
         job.step(k, len(with_voice), f"Voice {k + 1}/{len(with_voice)} (scene {sh['scene']})")
+        job.at(sh, voice=vname)
         if not cache.fresh(dest, key):
             log(f"voice {sh['id']}: {vname} '{sh['voice'][:60]}'")
-            raw = comfy.tts(sh["voice"], W(f"{sh['id']}_voice_raw.flac"), vpath, own_voice_path=own,
-                            exaggeration=float(o["voice_emotion"]), seed=sh["seed"], language=o["voice_language"])
+            raw = _gpu(job, comfy.tts, sh["voice"], W(f"{sh['id']}_voice_raw.flac"), vpath, own_voice_path=own,
+                       exaggeration=float(o["voice_emotion"]), seed=sh["seed"], language=o["voice_language"])
             media.prepare_voice(raw, dest, float(o["voice_speed"]))
             cache.put(dest, key)
 
@@ -375,9 +426,10 @@ def _render(slug, pdir, work, job, only_scene):
         dest = W(f"{sh['id']}_img.png")
         key = _key(prompt, img_ckpt, sh["seed"], w, h, q["img_steps"])
         job.step(k, len(need_img), f"Picture {k + 1}/{len(need_img)} (scene {sh['scene']})")
+        job.at(sh, model=img_ckpt)
         if not cache.fresh(dest, key):
             log(f"image {sh['id']}: {prompt[:120]}")
-            comfy.sdxl_image(prompt, dest, img_ckpt, seed=sh["seed"], width=w, height=h, steps=q["img_steps"])
+            _gpu(job, comfy.sdxl_image, prompt, dest, img_ckpt, seed=sh["seed"], width=w, height=h, steps=q["img_steps"])
             cache.put(dest, key)
 
     # ---- 3. animation (a shot longer than one clip continues from its own last frame)
@@ -395,6 +447,7 @@ def _render(slug, pdir, work, job, only_scene):
         key = _key(e, prompt, vid_ckpt, sh["seed"], vw, vh, q["vid_steps"], min(seg_s, cap_s), segs,
                    file_sig(img) if e == "ltx_i2v" else "")
         job.step(k, len(need_vid), f"Animating {k + 1}/{len(need_vid)} (scene {sh['scene']})")
+        job.at(sh, engine=e, model=vid_ckpt, segments=segs)
         if cache.fresh(dest, key):
             continue
         log(f"video {sh['id']} {e} x{segs}: {prompt[:120]}")
@@ -403,21 +456,22 @@ def _render(slug, pdir, work, job, only_scene):
             for g in range(segs):
                 out = dest if segs == 1 else W(f"{sh['id']}_seg{g}.mp4")
                 if e == "wan":
-                    comfy.wan_video(prompt, out, seconds=seg_s, seed=sh["seed"])
+                    _gpu(job, comfy.wan_video, prompt, out, seconds=seg_s, seed=sh["seed"])
                 elif e == "ltx_t2v" and g == 0:
-                    comfy.ltx_video(prompt, out, vid_ckpt, seconds=seg_s, seed=sh["seed"], width=vw, height=vh,
-                                    steps=q["vid_steps"], cap=cap)
+                    _gpu(job, comfy.ltx_video, prompt, out, vid_ckpt, seconds=seg_s, seed=sh["seed"], width=vw,
+                         height=vh, steps=q["vid_steps"], cap=cap)
                 else:
                     start = img if g == 0 else media.last_frame(parts[-1], W(f"{sh['id']}_seg{g}_start.png"))
-                    comfy.ltx_animate(start, prompt, out, vid_ckpt, seconds=seg_s, seed=sh["seed"] + g, width=vw,
-                                      height=vh, steps=q["vid_steps"], cap=cap)
+                    _gpu(job, comfy.ltx_animate, start, prompt, out, vid_ckpt, seconds=seg_s, seed=sh["seed"] + g,
+                         width=vw, height=vh, steps=q["vid_steps"], cap=cap)
                 parts.append(out)
             if segs > 1:
                 media.join_segments(parts, dest)
             cache.put(dest, key)
         except Exception as ex:
-            if e == "ltx_i2v" and os.path.exists(img):
-                job.warn(f"Scene {sh['scene']}: animation failed ({str(ex)[:120]}); using a camera move on the picture.")
+            if e == "ltx_i2v" and os.path.exists(img) and errors.classify(ex) not in ("CANCELLED", "COMFY_DOWN"):
+                job.warn(f"Scene {sh['scene']}: animation failed ({str(ex)[:120]}); using a camera move on the picture.",
+                         ex)
                 sh["engine"] = "still"
             else:
                 raise
@@ -428,6 +482,7 @@ def _render(slug, pdir, work, job, only_scene):
     look = o.get("look", "film")
     for k, sh in enumerate(todo):
         j = shots.index(sh)
+        job.at(sh, engine=sh["engine"])
         dest = W(f"{sh['id']}_clip.mp4")
         fi = fade if j > 0 else 0.0
         fo = 0.6 if j == n - 1 else fade
@@ -441,7 +496,7 @@ def _render(slug, pdir, work, job, only_scene):
         own_path = os.path.join(pdir, own) if own else ""
         src = {"still": W(f"{sh['id']}_img.png"), "own": own_path}.get(sh["engine"], W(f"{sh['id']}_raw.mp4"))
         if sh["engine"] == "own" and not (own_path and os.path.exists(own_path)):
-            raise RuntimeError(f"Scene {sh['scene']}: 'my own clip' is chosen but no file is uploaded for it.")
+            raise FactoryError("OWN_MEDIA", f"Scene {sh['scene']}: 'my own clip' is chosen but no file is uploaded for it.")
         kb = media.KB_CYCLE[j % len(media.KB_CYCLE)]
         key = _key(sh["engine"], file_sig(src), sh["clip_len"], sh["motion"], fi, fo, look, kb)
         job.step(k, len(todo), f"Clip {k + 1}/{len(todo)}")
@@ -457,6 +512,7 @@ def _render(slug, pdir, work, job, only_scene):
 
     # ---- 5. sound: effect beds + music per chapter
     job.stage("sound", "Sound")
+    job.at()
     t = 0.0
     for sh in shots:
         sh["start"] = t
@@ -467,9 +523,10 @@ def _render(slug, pdir, work, job, only_scene):
 
     # ---- 6. final video: one encode with crossfades, subtitles and sound
     job.stage("final", "Putting it together")
+    job.at()
     for sh in shots:
         if not os.path.exists(W(f"{sh['id']}_clip.mp4")):
-            raise RuntimeError(f"Missing clip {sh['id']}: render the whole video, not one scene.")
+            raise FactoryError("SCRIPT", f"Missing clip {sh['id']}: render the whole video, not one scene.")
     cues = []
     font = media.pick_font(o.get("sub_font", ""))
     chapter_starts = []
@@ -566,7 +623,7 @@ def _sfx_beds(sc, shots, work, o, cache, job, prefix=""):
                     comfy.stable_audio_sfx(sh["sound"], dest, seconds=10.0)
                     cache.put(dest, key)
                 except Exception as e:
-                    job.warn(f"Scene {sh['scene']}: AI sound effect failed ({str(e)[:100]}); using built-in sounds.")
+                    job.warn(f"Scene {sh['scene']}: AI sound effect failed ({str(e)[:100]}); using built-in sounds.", e)
                     ai = False
             if ai:
                 files[sh["id"]] = [dest]
@@ -654,7 +711,7 @@ def _music(sc, shots, total, work, o, cache, job, xf=3.0):
                                       os.path.join(work, f"music_raw{k:02d}.flac"), ace, seconds=min(240, length))
                 media.fit_music(raw, length, part)
             except Exception as e:
-                job.warn(f"AI music failed ({str(e)[:120]}); using the built-in music for this part.")
+                job.warn(f"AI music failed ({str(e)[:120]}); using the built-in music for this part.", e)
                 media.builtin_music(media.mood_of(mood_text + " " + sc["style"]), length, part)
         else:
             shift = [0, -2, 3, -4, 2, 5, -1][k % 7] if len(secs) > 1 else 0

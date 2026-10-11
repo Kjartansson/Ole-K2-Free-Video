@@ -95,7 +95,20 @@ Only one thing is required: at least one `SCENE` with a `VISUAL`.
 
 ## If something goes wrong
 
-- Run `./factory.sh doctor`.
-- Render log: `projects/<name>/render.log` (also under *Log* on the Render tab).
-- ComfyUI log: `logs/comfyui.log`. Server errors: `logs/server.log`.
-- Out of graphics memory? Use quality **draft** or the engine **Image + camera move**.
+- The GUI shows what went wrong, a hint what to do, and a **Copy error report** button. Paste that
+  report to Claude or Kimi: it has everything needed to find the cause.
+- **Help tab > Recent problems** lists the latest errors.
+- In a terminal:
+
+```bash
+./factory.sh errors
+```
+
+```bash
+./factory.sh report
+```
+
+`errors` lists the latest problems. `report` writes one file with everything (give that file to
+Claude or Kimi). `./factory.sh doctor` checks the installation.
+- Out of graphics memory (code GPU_OOM)? The factory retries once by itself. If it still fails, use
+  quality **draft** or the engine **Image + camera move**, and render again: finished parts are kept.
