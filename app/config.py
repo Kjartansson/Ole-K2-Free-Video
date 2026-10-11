@@ -15,12 +15,13 @@ WEB_DIR = os.path.join(ROOT, "web")
 PROJECTS_DIR = os.path.join(ROOT, "projects")
 EXPORTS_DIR = os.path.join(ROOT, "exports")
 MUSIC_DIR = os.path.join(ROOT, "music")
+BRAND_DIR = os.path.join(ROOT, "brand")
 SFX_DIR = os.path.join(ROOT, "sfx")
 VOICES_DIR = os.path.join(ROOT, "voices")
 LOGS_DIR = os.path.join(ROOT, "logs")
 SETTINGS_FILE = os.path.join(ROOT, "settings.json")
 
-for _d in (PROJECTS_DIR, EXPORTS_DIR, MUSIC_DIR, SFX_DIR, VOICES_DIR, LOGS_DIR):
+for _d in (PROJECTS_DIR, EXPORTS_DIR, MUSIC_DIR, BRAND_DIR, SFX_DIR, VOICES_DIR, LOGS_DIR):
     os.makedirs(_d, exist_ok=True)
 
 QUALITY = {
@@ -70,6 +71,19 @@ DEFAULTS = {
     "transition": "crossfade",  # crossfade | fade (dip to black) | cut
     "look": "film",             # film (shared grade + fine grain) | clean
     "chapter_titles": True,     # chapter title on screen when a chapter starts
+    # branding for marketing (off while brand_text and banner_text are empty)
+    "brand_text": "",            # e.g. voomreel.com: watermark + end card
+    "brand_watermark": True,     # small brand text in a corner for the whole video
+    "brand_position": "top-left",  # top-left | top-center | top-right | bottom-left
+    "brand_opacity": 0.8,        # 0.2-1.0
+    "brand_logo": "",            # PNG/WebP file in brand/ (with the watermark and on the end card)
+    "brand_color": "#FFB020",    # banner colour
+    "banner_text": "",           # e.g. "Free video downloader -> voomreel.com" ("" = no banner)
+    "banner_when": "start",      # start (first 5 s) | end (last 5 s before the end card) | always
+    "end_card": True,            # 3 s closing card with the brand (needs brand_text)
+    "end_card_line": "",         # small line above the brand on the end card
+    "caption_add": "",           # added to every TikTok caption, e.g. "🔗 voomreel.com"
+    "branding": "on",            # per project: on | off
     "hf_token": "",
 }
 

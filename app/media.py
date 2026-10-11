@@ -76,7 +76,7 @@ def _motion_kind(motion, default="in"):
 
 LOOKS = {
     # one shared grade + fine grain makes pictures from different seeds/models sit together
-    "film": ",eq=contrast=1.05:saturation=0.92:gamma=0.98,noise=alls=5:allf=t",
+    "film": ",eq=contrast=1.05:saturation=0.92:gamma=0.98,noise=alls=4:allf=t",
     "clean": "",
 }
 KB_CYCLE = ["in", "right", "out", "left", "up", "in", "down"]
@@ -164,26 +164,45 @@ def _xfade_chain(n, shown, overlap, kinds):
     return ";".join(g), prev
 
 
+def _overlay_graph(cur, overlays, first):
+    """Logo overlay chain on top of pad `cur` (no brackets); logo inputs start at index `first`
+    (extra -i inputs AFTER the audio input). Returns (graph, last pad); ("", cur) with no overlays."""
+    graph = []
+    for k, o in enumerate(overlays):
+        graph.append(f"[{first + k}:v]scale=-1:{o['h']},format=rgba,colorchannelmixer=aa={o['opacity']}[lg{k}]")
+        graph.append(f"[{cur}][lg{k}]overlay=x={o['x']}:y={o['y']}"
+                     f":enable='between(t,{o['start']},{o['end']})'[ov{k}]")
+        cur = f"ov{k}"
+    return ";".join(graph), cur
+
+
 def assemble(clips, durs, dest, workdir, audio, ass=None, transition="crossfade", overlap=0.35,
-             chapter_starts=(), crf=20, chunk=12, on_step=None):
+             chapter_starts=(), crf=20, chunk=12, on_step=None, overlays=()):
     """Clips -> final.mp4 in ONE final encode (subtitles burned in, audio muxed).
     crossfade: every clip except the last must be `overlap` s longer than its scene (durs).
-    Long videos crossfade in chunks of `chunk` clips first (ffmpeg should not open 150 inputs)."""
+    Long videos crossfade in chunks of `chunk` clips first (ffmpeg should not open 150 inputs).
+    overlays: [{"path", "x", "y", "h", "start", "end", "opacity"}] logo overlays burned in before
+    the subtitles (x/y may be ffmpeg overlay expressions like "(W-w)/2")."""
     total = sum(durs)
     sub = ""
     if ass:
         esc = ass.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
         sub = f",ass='{esc}'"
-    enc = ["-c:v", "libx264", "-preset", "medium", "-crf", crf, "-pix_fmt", "yuv420p", "-r", FPS,
+    # bitrate cap: grain makes x264 spend a lot; TikTok's app refuses very large files (a 4 min video was 309 MB)
+    enc = ["-c:v", "libx264", "-preset", "medium", "-crf", crf, "-maxrate", "6M", "-bufsize", "12M",
+           "-pix_fmt", "yuv420p", "-r", FPS,
            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", f"{total:.3f}", dest]
+    logos = sum((["-i", o["path"]] for o in overlays), [])
     n = len(clips)
     if transition != "crossfade" or n == 1:
         lst = os.path.join(workdir, "concat.txt")
         with open(lst, "w") as f:
             for c in clips:
                 f.write("file '" + os.path.abspath(c).replace("'", "'\\''") + "'\n")
-        run(["-f", "concat", "-safe", "0", "-i", lst, "-i", audio, "-filter_complex", f"[0:v]null{sub}[v]",
-             "-map", "[v]", "-map", "1:a"] + enc, timeout=7200)
+        ograph, olast = _overlay_graph("0:v", overlays, 2)
+        fc = (ograph + ";" if ograph else "") + f"[{olast}]null{sub}[v]"
+        run(["-f", "concat", "-safe", "0", "-i", lst, "-i", audio] + logos +
+            ["-filter_complex", fc, "-map", "[v]", "-map", "1:a"] + enc, timeout=7200)
         return dest
     starts = set(chapter_starts)
     kinds = ["fadeblack" if (i + 1) in starts else "fade" for i in range(n)]
@@ -208,7 +227,9 @@ def assemble(clips, durs, dest, workdir, audio, ass=None, transition="crossfade"
                 on_step(gi + 1, len(groups) + 1)
     graph, last = _xfade_chain(len(inputs), shown, overlap, gk)
     ins = sum((["-i", c] for c in inputs), [])
-    run(ins + ["-i", audio, "-filter_complex", graph + f";[{last}]null{sub}[v]", "-map", "[v]",
+    ograph, olast = _overlay_graph(last, overlays, len(inputs) + 1)
+    fc = graph + (";" + ograph if ograph else "") + f";[{olast}]null{sub}[v]"
+    run(ins + ["-i", audio] + logos + ["-filter_complex", fc, "-map", "[v]",
                "-map", f"{len(inputs)}:a"] + enc, timeout=7200)
     return dest
 
@@ -272,8 +293,39 @@ def _esc(s):
     return s.replace("\\", "\\\\").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
-def write_ass(path, cues, font, serif=""):
-    """cues: [{kind: 'big'|'cap', start, end, text, words: [(word, dur)]}]"""
+def ass_color(hexrgb, alpha=0.0):
+    """Hex #RRGGBB -> ASS &HAABBGGRR (alpha 0 = opaque, 1 = invisible)."""
+    h = (hexrgb or "").lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):
+        h = "FFFFFF"
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    a = max(0, min(255, int(round(alpha * 255))))
+    return "&H%02X%02X%02X%02X" % (a, b, g, r)
+
+
+def text_on(hexrgb):
+    """Readable text colour on a #RRGGBB background: black on light, white on dark."""
+    h = (hexrgb or "").lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):
+        return "&H00FFFFFF"
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return "&H00000000" if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 else "&H00FFFFFF"
+
+
+def image_size(path):
+    """(w, h) of a picture via ffprobe, (0, 0) on failure."""
+    try:
+        out = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "stream=width,height",
+                              "-of", "json", path], capture_output=True, text=True, timeout=60).stdout
+        st = json.loads(out)["streams"][0]
+        return int(st["width"]), int(st["height"])
+    except Exception:
+        return 0, 0
+
+
+def write_ass(path, cues, font, serif="", brand=None):
+    """cues: [{kind: 'big'|'cap'|'card'|'cover'|'brand'|'banner'|'endcard', start, end, text, ...}]
+    brand = {"color", "opacity", "position"} adds the Brand/Banner/Endcard styles."""
     head = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -291,6 +343,17 @@ Style: Cover,{font},128,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    if brand:
+        col = brand.get("color", "#FFB020")
+        wa = 1 - float(brand.get("opacity", 0.8))
+        al, ml, mr, mv = {"top-left": (7, 60, 60, 170), "top-center": (8, 0, 0, 170),
+                          "top-right": (9, 60, 150, 170), "bottom-left": (1, 60, 60, 470)}.get(
+            brand.get("position", "top-left"), (7, 60, 60, 170))
+        styles = "\n".join([
+            f"Style: Brand,{font},46,{ass_color('#FFFFFF', wa)},&H00FFFFFF,{ass_color('#000000', wa)},&H64000000,-1,0,0,0,100,100,0,0,1,3,1,{al},{ml},{mr},{mv},1",
+            f"Style: Banner,{font},52,{text_on(col)},&H00FFFFFF,{ass_color(col)},{ass_color(col)},-1,0,0,0,100,100,0,0,3,16,0,8,80,150,250,1",
+            f"Style: Endcard,{font},92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,0,0,5,80,80,80,1"])
+        head = head.replace("\n\n[Events]", "\n" + styles + "\n\n[Events]")
     lines = []
     for c in cues:
         if c["kind"] == "big":
@@ -300,6 +363,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             lines.append(f"Dialogue: 2,{_t(c['start'])},{_t(c['end'])},Card,,0,0,0,,{{\\fad(600,600)}}{body}")
         elif c["kind"] == "cover":
             lines.append(f"Dialogue: 1,{_t(c['start'])},{_t(c['end'])},Cover,,0,0,0,,{_esc(c['text'].upper())}")
+        elif c["kind"] == "brand":
+            lines.append(f"Dialogue: 3,{_t(c['start'])},{_t(c['end'])},Brand,,{int(c.get('margin_l') or 0)},0,0,,{_esc(c['text'])}")
+        elif c["kind"] == "banner":
+            lines.append(f"Dialogue: 3,{_t(c['start'])},{_t(c['end'])},Banner,,0,0,0,,{{\\fad(300,300)}}{_esc(c['text'])}")
+        elif c["kind"] == "endcard":
+            body = "{\\fad(400,0)}" + ("{\\pos(540,1150)}" if c.get("logo") else "")
+            if c.get("line"):
+                body += "{\\fs48\\b0}" + _esc(c["line"]) + "\\N{\\fs92\\b1}"
+            body += _esc(c["text"])
+            lines.append(f"Dialogue: 3,{_t(c['start'])},{_t(c['end'])},Endcard,,0,0,0,,{body}")
         else:
             # karaoke: the spoken word turns yellow (PrimaryColour) as it is said
             body = "".join(f"{{\\k{max(1, int(round(d * 100)))}}}{_esc(w)} " for w, d in c["words"]).strip()
@@ -569,12 +642,12 @@ def mux(video, audio, dest, crf=20):
     return dest
 
 
-def cover(video, at, title, dest, workdir, font):
+def cover(video, at, title, dest, workdir, font, extra_cues=(), brand=None):
     """Cover image: a frame from the video with the hook/title printed big in the middle."""
     frame = os.path.join(workdir, "cover_frame.png")
     run(["-ss", f"{at:.2f}", "-i", video, "-frames:v", 1, frame])
-    ass = write_ass(os.path.join(workdir, "cover.ass"),
-                    [{"kind": "cover", "start": 0, "end": 5, "text": title}] if title else [], font)
+    cues = ([{"kind": "cover", "start": 0, "end": 5, "text": title}] if title else []) + list(extra_cues)
+    ass = write_ass(os.path.join(workdir, "cover.ass"), cues, font, brand=brand)
     esc = ass.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     run(["-i", frame, "-vf", f"eq=brightness=-0.06,ass='{esc}'", "-frames:v", 1, "-q:v", 2, dest])
     return dest

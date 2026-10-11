@@ -128,7 +128,10 @@ $('#btnNewProj').onclick = () => {
   S.newScript = true;
   $('#projSel').value = ''; openProject('');
   $('#script').value = ''; $('#projName').value = ''; $('#outName').value = '';
+  showCheck(null);
   showTab('story');
+  $('#projName').focus();
+  toast('New video: give it a name, then write or paste the script.');
 };
 
 async function openProject(slug) {

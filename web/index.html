@@ -115,6 +115,19 @@
 
     <div class="col">
       <div class="card">
+        <h3>Name this video</h3>
+        <div class="grid2">
+          <label>Project name<input id="projName" placeholder="e.g. Lighthouse part 1"></label>
+          <label>Output file name<input id="outName" placeholder="empty = date_project-name"></label>
+        </div>
+        <div class="row">
+          <button class="primary" id="btnSaveRender">Save and render video</button>
+          <button id="btnSaveNew">Save as new project</button>
+          <button id="btnSaveCur" class="hidden">Save to this project</button>
+          <span class="muted" id="saveHint"></span>
+        </div>
+      </div>
+      <div class="card">
         <div class="cardhead"><h3>Script</h3><span class="muted" id="scriptStat"></span></div>
         <textarea id="script" class="mono" rows="26" spellcheck="false" placeholder="Paste or write the script here. Use the Template tab to see the format."></textarea>
         <div class="row">
@@ -127,19 +140,6 @@
           <button id="btnImprove">Improve with local AI</button>
         </div>
         <ul class="warnings" id="warnings"></ul>
-      </div>
-      <div class="card">
-        <h3>Save</h3>
-        <div class="grid2">
-          <label>Project name<input id="projName" placeholder="e.g. Lighthouse part 1"></label>
-          <label>Output file name<input id="outName" placeholder="empty = date_project-name"></label>
-        </div>
-        <div class="row">
-          <button class="primary" id="btnSaveRender">Save and render video</button>
-          <button id="btnSaveNew">Save as new project</button>
-          <button id="btnSaveCur" class="hidden">Save to this project</button>
-          <span class="muted" id="saveHint"></span>
-        </div>
       </div>
     </div>
   </div>

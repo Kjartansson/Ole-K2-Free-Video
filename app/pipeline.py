@@ -423,9 +423,10 @@ def _render(slug, pdir, work, job, only_scene):
     w, h = q["img"]
     for k, sh in enumerate(need_img):
         prompt = _shot_prompt(sc, sh) + " Highly detailed, sharp focus, vertical composition."
-        negative = comfy.NEG_IMAGE + _prompt_fixes(prompt)[1]
+        extra_neg = _prompt_fixes(prompt)[1]
+        negative = comfy.NEG_IMAGE + extra_neg
         dest = W(f"{sh['id']}_img.png")
-        key = _key(prompt, img_ckpt, sh["seed"], w, h, q["img_steps"], negative)
+        key = _key(prompt, img_ckpt, sh["seed"], w, h, q["img_steps"], *([negative] if extra_neg else []))
         job.step(k, len(need_img), f"Picture {k + 1}/{len(need_img)} (scene {sh['scene']})")
         job.at(sh, model=img_ckpt)
         if not cache.fresh(dest, key):
