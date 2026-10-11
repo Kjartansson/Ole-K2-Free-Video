@@ -179,7 +179,7 @@ def split_line(text, max_words):
             lines[-1] += " " + p
         else:
             lines.append(p)
-    if len(lines) > 1 and len(lines[-1].split()) < 4 and len(lines[-2].split()) + len(lines[-1].split()) <= max_words * 1.3:
+    if len(lines) > 1 and len(lines[-1].split()) < 4 and len(lines[-2].split()) + len(lines[-1].split()) <= max_words + 2:
         lines[-2] += " " + lines.pop()
     return lines
 
@@ -211,7 +211,8 @@ def plan_shots(sc, max_words, max_still, keep_whole=()):
         total_words = max(1, len(s["voice"].split()))
         for j, line in enumerate(lines):
             sh = dict(s)
-            sh.update(scene=i, part=j, parts=len(lines), voice=line, id=f"s{i:02d}" + ("" if j == 0 else chr(97 + j)))
+            sh.update(scene=i, part=j, parts=len(lines), voice=line,
+                      id=f"s{i:02d}" + ("" if j == 0 else chr(97 + j) if j < 26 else f"_{j + 1:03d}"))
             if s["seconds"]:
                 sh["seconds"] = round(s["seconds"] * (len(line.split()) / total_words if s["voice"] else 1 / len(lines)), 2)
             if j:

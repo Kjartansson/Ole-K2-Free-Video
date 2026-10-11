@@ -139,6 +139,12 @@ voice. Text-only scenes render as title cards (`media.card_clip` + serif centred
 GUI: newest project opens by itself, empty Scenes/Render tabs list projects, "Save and render video"
 button. Server reloads app/*.py by itself when they change (server.py itself still needs a restart).
 
+Kimi read-only review of the parser (10-11 ~22:00, `logs/tests/kimi_review.txt`): fixed `DURATION: 1:30`
+(was 30 s), shot ids past 26 parts (`s01_027`), "Remember: ..." eaten as a speaker (now an unknown
+Title-case name only counts if the pictures mention it; ALL-CAPS names still count, so "NASA: ..." is a
+known false positive), "2024. ..." losing the year, apostrophes stripped from 'Twas, two fenced JSON
+blocks, "ACT ONE"/"PART TWO" chapters, last-piece merge capped at max_words + 2.
+
 ## State (2026-10-11 22:15, Kimi session)
 
 - Everything above works on this PC. Projects on disk: `smoke-test`, `chapter-test` (rendered),

@@ -54,7 +54,9 @@ SCENE_FIELDS = ("visual", "motion", "voice", "text", "sound")
 HEADER_ONLY = {k for k in HEADER_KEYS if k not in SCENE_KEYS}
 
 _scene_re = re.compile(r"^(?:scene|shot|clip)\s*#?\s*(\d+)?\b(.*)$", re.I)
-_chapter_re = re.compile(r"^(?:chapter|act|part)\s*#?\s*(\d+|[ivxlc]+)?\b\s*[:.\-–|]?\s*(.*)$", re.I)
+_NUMWORDS = ("one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+             "sixteen|seventeen|eighteen|nineteen|twenty|first|second|third|fourth|fifth|final|last")
+_chapter_re = re.compile(r"^(?:chapter|act|part)\s*#?\s*(\d+|[ivxlc]+|" + _NUMWORDS + r")?\b\s*[:.\-–|]?\s*(.*)$", re.I)
 _key_re = re.compile(r"^([A-Za-z][A-Za-z' \-/]{0,24}?)\s*(?:\([^)]*\))?\s*(?:[—–]\s*[^:]{0,80}?)?\s*[:=]\s*(.*)$")
 _bracket_re = re.compile(r"^\[([^\]]{1,80})\]\s*(.*)$")
 _slug_re = re.compile(r"^(INT|EXT|INT/EXT|I/E)[.\s]+\S", re.I)
@@ -76,7 +78,7 @@ def _clean_line(line):
     s = line.strip()
     s = re.sub(r"^[#>*\-•\s]+", "", s)          # markdown headings, bullets, quotes
     s = s.replace("**", "").replace("__", "")
-    s = re.sub(r"^\d+[.)]\s+", "", s) if not _scene_re.match(s) else s
+    s = re.sub(r"^\d{1,2}[.)]\s+", "", s) if not _scene_re.match(s) else s
     return s.strip()
 
 
@@ -119,7 +121,7 @@ def _character(text):
 
 def _strip_quotes(s):
     s = s.strip()
-    if len(s) >= 2 and s[0] in "\"“'" and s[-1] in "\"”'":
+    if len(s) >= 2 and s[0] in "\"“„«" and s[-1] in "\"”“»":
         s = s[1:-1]
     return s.strip()
 
@@ -290,7 +292,8 @@ def parse(text):
         if not field and km and _is_speaker(key, sc):
             field, val = "voice", f"{km.group(1).strip()}: {val}"
         if field == "seconds":
-            cur["seconds"] = _seconds(val + "s") or cur["seconds"]
+            mm = re.match(r"^\s*(\d+):(\d{2})\s*$", val)            # DURATION: 1:30
+            cur["seconds"] = (int(mm.group(1)) * 60 + int(mm.group(2))) if mm else (_seconds(val + "s") or cur["seconds"])
             continue
         if field:
             if field == "voice":
@@ -361,8 +364,8 @@ def _is_speaker(key, sc):
 def _voice_line(val, cur, sc):
     """Pull a 'Name:' speaker prefix and stage directions out of a voice line."""
     m = re.match(r"^([A-Za-z][\w .'\-]{0,30}?)\s*(?:\([^)]*\))?\s*:\s*(.+)$", val)
-    if m and (_is_speaker(m.group(1).lower(), sc) or (m.group(1)[0].isupper() and m.group(1).upper() == m.group(1))
-              or (len(m.group(1).split()) <= 2 and m.group(1).istitle())) \
+    if m and (_is_speaker(m.group(1).lower(), sc) or (m.group(1)[0].isupper() and m.group(1).upper() == m.group(1)
+                                                       and len(m.group(1)) > 3)) \
             and m.group(1).lower() not in ("narrator", "vo", "v.o"):
         sp = m.group(1).strip()
         cur["speaker"] = cur.get("speaker") or (sp.lower() if VOICE_NAME.match(sp) else sp.title())
@@ -375,9 +378,11 @@ def _voice_line(val, cur, sc):
 
 def _try_json(text):
     if "```" in text:
-        m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
-        if m:
-            text = m.group(1)
+        for block in re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S):
+            try:
+                return json.loads(block)
+            except ValueError:
+                continue
     if not text.startswith("{"):
         return None
     try:
@@ -456,6 +461,13 @@ def normalize(sc):
         except (TypeError, ValueError):
             s["seconds"] = 0.0
     sc["scenes"] = [s for s in sc["scenes"] if s["visual"] or s["voice"] or s["text"]]
+    # "Mara: Cold." without a CHARACTER line: Mara is a speaker if the pictures show a Mara
+    seen = set(re.findall(r"\b[A-Z][a-z]+\b", " ".join(s["visual"] for s in sc["scenes"])))
+    seen |= {c["name"] for c in sc.get("characters") or []}
+    for s in sc["scenes"]:
+        m = re.match(r"^([A-Z][a-z]+(?: [A-Z][a-z]+)?):\s+(.+)$", s["voice"])
+        if m and not s["speaker"] and m.group(1) in seen:
+            s["speaker"], s["voice"] = m.group(1), m.group(2)
     chs = [c for c in (sc.get("chapters") or []) if isinstance(c, dict)]
     for s in sc["scenes"]:
         try:
