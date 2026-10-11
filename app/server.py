@@ -720,7 +720,12 @@ def main():
                     help="0.0.0.0 lets other PCs on your network open the GUI (no password!)")
     a = ap.parse_args()
     apply_settings(s)
-    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    try:
+        srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    except OSError as e:
+        errors.record(e, "server", port=a.port)
+        sys.exit(f"Cannot use port {a.port}: {e.strerror}. Is the factory already running? "
+                 f"Open http://127.0.0.1:{a.port} or run ./factory.sh restart")
     srv.daemon_threads = True
     print(f"Ole-K2-Free-Video GUI: http://{'127.0.0.1' if a.host in ('0.0.0.0', '') else a.host}:{a.port}", flush=True)
     if a.host not in ("127.0.0.1", "localhost"):

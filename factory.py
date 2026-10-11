@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 import webbrowser
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -106,24 +107,115 @@ def stop_started():
 
 
 # ------------------------------------------------------------------ commands
+GUI_PID = os.path.join(config.LOGS_DIR, "gui.pid")
+
+
+def _port_owner(port):
+    """None = free, 'factory' = our GUI already answers there, 'other' = another program has it."""
+    import json
+    import socket
+    with socket.socket() as sk:
+        sk.settimeout(1)
+        if sk.connect_ex(("127.0.0.1", port)) != 0:
+            return None
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=5) as r:
+            return "factory" if "comfy" in json.loads(r.read()) else "other"
+    except Exception:
+        return "other"
+
+
+def _gui_pid():
+    try:
+        with open(GUI_PID) as f:
+            pid, port = f.read().split()
+        return int(pid), int(port)
+    except (OSError, ValueError):
+        return None, None
+
+
+def _pid_on_port(port):
+    """Process listening on the port (for a GUI started before gui.pid existed). Linux/macOS."""
+    import re
+    for cmd in (["ss", "-ltnpH", f"sport = :{port}"], ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"]):
+        if shutil.which(cmd[0]):
+            out = subprocess.run(cmd, capture_output=True, text=True).stdout
+            m = re.search(r"pid=(\d+)", out) or re.search(r"^(\d+)$", out.strip(), re.M)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def cmd_stop(a, quiet=False):
+    """Stop the running GUI (like Ctrl+C in its window). Renders keep going: they run on their own."""
+    pid, port = _gui_pid()
+    if not pid:
+        port = getattr(a, "port", 0) or int(config.load_settings().get("port", 8770))
+        if _port_owner(port) == "factory":
+            pid = _pid_on_port(port)
+    if not pid:
+        if not quiet:
+            say("No factory GUI found (logs/gui.pid). If one still runs in another window, press Ctrl+C there.")
+        return False
+    import signal
+    try:
+        os.kill(pid, signal.SIGINT if platform.system() != "Windows" else signal.SIGTERM)
+    except OSError:
+        say(f"The factory GUI (pid {pid}) was not running any more.")
+        os.remove(GUI_PID)
+        return False
+    for _ in range(40):
+        if not _port_owner(port):
+            break
+        time.sleep(0.25)
+    say(f"Stopped the factory GUI (pid {pid}, port {port}). Renders that were running keep going.")
+    return True
+
+
+def cmd_restart(a):
+    cmd_stop(a, quiet=True)
+    cmd_gui(a)
+
+
 def cmd_gui(a):
     s = config.load_settings()
     ok, why = config.ffmpeg_ok()
     if not ok:
         say(f"! {why}. Install ffmpeg first (see INSTALL.md).")
+    port = a.port or int(s.get("port", 8770))
+    owner = _port_owner(port)
+    if owner == "factory":
+        url = f"http://127.0.0.1:{port}"
+        say(f"\n  The factory is already running: {url} (opening it in the browser).\n"
+            f"  To restart it with the newest code: ./factory.sh restart\n")
+        if not a.no_browser:
+            webbrowser.open(url)
+        return
+    if owner == "other":
+        free = next((p for p in range(port + 1, port + 30) if not _port_owner(p)), None)
+        if not free:
+            sys.exit(f"Port {port} and the next ones are taken by other programs. Start with --port <number>.")
+        say(f"  Port {port} is used by another program; using {free} instead.")
+        port = free
     if not a.no_comfy:
         threading.Thread(target=ensure_comfy, args=(s,), daemon=True).start()
     threading.Thread(target=ensure_ollama, args=(s,), daemon=True).start()
-    port = a.port or int(s.get("port", 8770))
     url = f"http://127.0.0.1:{port}"
     if not a.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     say(f"\n  Ole-K2 Free Video is running:  {url}\n  Close this window or press Ctrl+C to stop.\n")
     sys.argv = [sys.argv[0], "--port", str(port), "--host", a.host]
     import server
+    with open(GUI_PID, "w") as f:
+        f.write(f"{os.getpid()} {port}")
     try:
         server.main()
     finally:
+        try:
+            if _gui_pid()[0] == os.getpid():
+                os.remove(GUI_PID)
+        except OSError:
+            pass
         stop_started()
 
 
@@ -324,9 +416,16 @@ def main():
     er.add_argument("--ref", default="", help="show one error in full")
     sub.add_parser("report", help="write one file with everything needed to debug a problem")
     sub.add_parser("shortcut", help="add an app-menu launcher (Linux)")
+    sub.add_parser("stop", help="stop the running GUI (renders keep going)")
+    rs = sub.add_parser("restart", help="stop the running GUI and start it again with the newest code")
+    for p in (rs,):
+        p.add_argument("--port", type=int, default=0)
+        p.add_argument("--host", default="127.0.0.1")
+        p.add_argument("--no-browser", action="store_true")
+        p.add_argument("--no-comfy", action="store_true")
     a = ap.parse_args()
     {"make": cmd_make, "write": cmd_write, "doctor": cmd_doctor, "errors": cmd_errors, "report": cmd_report,
-     "shortcut": cmd_shortcut}.get(a.cmd, cmd_gui)(a)
+     "shortcut": cmd_shortcut, "stop": cmd_stop, "restart": cmd_restart}.get(a.cmd, cmd_gui)(a)
 
 
 if __name__ == "__main__":
