@@ -75,6 +75,14 @@ async function loadProblems() {
   $$('#problems [data-copyref]').forEach(b => b.onclick = () => copyReport(b.dataset.copyref));
 }
 $$('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$('#pComfy').onclick = async () => {
+  if ($('#pComfy').classList.contains('up') || $('#pComfy').classList.contains('starting')) return;
+  try {
+    const r = await api('/api/comfy/start', {});
+    toast(r.state === 'running' ? 'ComfyUI is already running' : 'Starting ComfyUI (20-60 s). The dot turns green when it is ready.');
+    $('#pComfy').classList.add('starting'); setTimeout(pollStatus, 3000);
+  } catch (e) { fail(e); }
+};
 $$('#srcSeg button').forEach(b => b.onclick = () => {
   $$('#srcSeg button').forEach(x => x.classList.toggle('on', x === b));
   $$('.src').forEach(s => s.classList.toggle('hidden', s.id !== 'src-' + b.dataset.src));
@@ -84,9 +92,14 @@ $$('#srcSeg button').forEach(b => b.onclick = () => {
 async function pollStatus() {
   try {
     const s = await api('/api/status');
+    const starting = !s.comfy && s.comfy_state === 'starting';
     $('#pComfy').classList.toggle('up', s.comfy);
+    $('#pComfy').classList.toggle('starting', starting);
+    $('#pComfy').classList.toggle('clickable', !s.comfy && !starting);
     $('#pOllama').classList.toggle('up', s.ollama);
-    $('#pComfy').title = s.comfy ? 'ComfyUI is running' : 'ComfyUI is not reachable';
+    $('#pComfy').title = s.comfy ? 'ComfyUI is running' : starting ? 'ComfyUI is starting (20-60 s)'
+      : (s.comfy_state || '').startsWith('failed') ? s.comfy_state.slice(8) + ' Click to try again.'
+      : 'ComfyUI is not running. Click to start it.';
     $('#pOllama').title = s.ollama ? 'Ollama is running' : 'Ollama is not reachable';
     S.tasks = s.tasks;
     if ($('#tab-models').classList.contains('on')) drawTasks(s.tasks);

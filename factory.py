@@ -29,81 +29,24 @@ if sys.version_info < (3, 9):
 import comfy     # noqa: E402
 import config    # noqa: E402
 import llm       # noqa: E402
-
-STARTED = {"comfy": None}
+import services  # noqa: E402
 
 
 def say(msg):
     print(msg, flush=True)
 
 
-# ------------------------------------------------------------------ services
-def comfy_command(cdir, url):
-    port = urllib.parse.urlparse(url).port or 8188
-    if os.path.isfile(os.path.join(cdir, "start.sh")) and platform.system() != "Windows":
-        return ["bash", os.path.join(cdir, "start.sh")]
-    cands = [os.path.join(cdir, "venv", "bin", "python"), os.path.join(cdir, ".venv", "bin", "python"),
-             os.path.join(cdir, "venv", "Scripts", "python.exe"), os.path.join(cdir, ".venv", "Scripts", "python.exe"),
-             os.path.join(os.path.dirname(cdir), "python_embeded", "python.exe")]
-    py = next((p for p in cands if os.path.isfile(p)), sys.executable)
-    return [py, "-s", os.path.join(cdir, "main.py"), "--listen", "127.0.0.1", "--port", str(port)]
-
-
+# ------------------------------------------------------------------ services (app/services.py)
 def ensure_comfy(s, wait=180):
-    comfy.configure(s["comfy_url"])
-    if comfy.alive():
-        return True
-    host = urllib.parse.urlparse(s["comfy_url"]).hostname
-    cdir = config.find_comfy_dir(s)
-    if host not in ("127.0.0.1", "localhost") or not cdir or not s.get("comfy_autostart", True):
-        say(f"! ComfyUI is not reachable at {s['comfy_url']}" + ("" if cdir else " and no local ComfyUI folder was found"))
-        return False
-    cmd = comfy_command(cdir, s["comfy_url"])
-    log = open(os.path.join(config.LOGS_DIR, "comfyui.log"), "a")
-    say(f"Starting ComfyUI ({cdir}) ... log: logs/comfyui.log")
-    kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
-    STARTED["comfy"] = subprocess.Popen(cmd, cwd=cdir, stdout=log, stderr=subprocess.STDOUT, **kw)
-    t0 = time.time()
-    while time.time() - t0 < wait:
-        if comfy.alive():
-            say(f"ComfyUI is up ({time.time() - t0:.0f} s)")
-            return True
-        if STARTED["comfy"].poll() is not None:
-            say("! ComfyUI stopped while starting. See logs/comfyui.log")
-            return False
-        time.sleep(2)
-    say("! ComfyUI did not answer in time. See logs/comfyui.log")
-    return False
+    return services.start_comfy(s, wait, say)
 
 
 def ensure_ollama(s):
-    llm.configure(s["ollama_url"])
-    if llm.alive():
-        return True
-    host = urllib.parse.urlparse(s["ollama_url"]).hostname
-    exe = shutil.which("ollama")
-    if host in ("127.0.0.1", "localhost") and exe:
-        say("Starting Ollama ...")
-        log = open(os.path.join(config.LOGS_DIR, "ollama.log"), "a")
-        kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
-        subprocess.Popen([exe, "serve"], stdout=log, stderr=subprocess.STDOUT, **kw)
-        for _ in range(20):
-            time.sleep(1)
-            if llm.alive():
-                return True
-    say(f"! Ollama is not reachable at {s['ollama_url']} (story writing with the local AI will not work)")
-    return False
+    return services.ensure_ollama(s, say)
 
 
 def stop_started():
-    p = STARTED["comfy"]
-    if p and p.poll() is None:
-        say("Stopping the ComfyUI this launcher started ...")
-        p.terminate()
-        try:
-            p.wait(20)
-        except subprocess.TimeoutExpired:
-            p.kill()
+    services.stop_started(say)
 
 
 # ------------------------------------------------------------------ commands
@@ -188,6 +131,16 @@ def cmd_gui(a):
         url = f"http://127.0.0.1:{port}"
         say(f"\n  The factory is already running: {url} (opening it in the browser).\n"
             f"  To restart it with the newest code: ./factory.sh restart\n")
+        comfy.configure(s["comfy_url"])
+        if not comfy.alive():
+            try:      # the running factory starts ComfyUI (and stops it again when it closes)
+                req = urllib.request.Request(f"{url}/api/comfy/start", data=b"{}", method="POST",
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10).read()
+                say("  ComfyUI was not running: the factory is starting it now (20-60 s).")
+            except Exception as e:
+                say(f"  ComfyUI is not running and could not be started from here ({e}). "
+                    f"Try ./factory.sh restart")
         if not a.no_browser:
             webbrowser.open(url)
         return

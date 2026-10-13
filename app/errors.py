@@ -25,8 +25,8 @@ FAIL_DIR = os.path.join(config.LOGS_DIR, "fail")
 DEBUG_LOG = os.path.join(config.LOGS_DIR, "debug.log")
 
 HINTS = {
-    "COMFY_DOWN": "ComfyUI is not running or not reachable. Start the factory with ./factory.sh (it starts "
-                  "ComfyUI) or check the address in Settings > Connections. ComfyUI's own log: logs/comfyui.log",
+    "COMFY_DOWN": "ComfyUI is not running. Click the red ComfyUI dot at the top of the page to start it "
+                  "(Render starts it by itself too), or run ./factory.sh. ComfyUI's own log: logs/comfyui.log",
     "COMFY_NODE": "A step inside ComfyUI failed. The node and its error are in the detail file, together with the "
                   "workflow, so it can be re-run in ComfyUI. ComfyUI's own log: logs/comfyui.log",
     "COMFY_REFUSED": "ComfyUI refused the job before starting (usually a model or node it does not have). "

@@ -28,6 +28,7 @@ import models     # noqa: E402
 import pipeline   # noqa: E402
 import projects   # noqa: E402
 import scriptfmt  # noqa: E402
+import services   # noqa: E402
 from errors import FactoryError  # noqa: E402
 
 FILE_ROOTS = {"projects": config.PROJECTS_DIR, "exports": config.EXPORTS_DIR, "music": config.MUSIC_DIR,
@@ -47,7 +48,7 @@ def maybe_reload():
     """Pick up updated app/*.py without restarting (the GUI keeps running while the factory is improved)."""
     global _MODS, _MTIME
     if _MODS is None:
-        _MODS = [config, errors, scriptfmt, comfy, llm, media, projects, models, pipeline]
+        _MODS = [config, errors, scriptfmt, comfy, llm, media, projects, models, pipeline]   # not services: it holds state
     app = os.path.join(config.ROOT, "app")
     newest = max(os.path.getmtime(os.path.join(app, f)) for f in os.listdir(app)
                  if f.endswith(".py") and f != "server.py")
@@ -106,7 +107,7 @@ def pid_alive(pid):
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmd = f.read()
-            return b"pipeline" in cmd or b"factory.py" in cmd
+            return b"pipeline" in cmd or b"factory.py" in cmd or b"server.py" in cmd
         except OSError:
             return False
     if platform.system() == "Windows":
@@ -145,6 +146,20 @@ def busy_tasks():
 
 
 # ------------------------------------------------------------------ render process
+def _write_job(slug, **state):
+    with open(projects.path(slug, "job.json"), "w") as f:
+        json.dump({"started": time.time(), "updated": time.time(), "warnings": [], "pct": 0, **state}, f)
+
+
+def _spawn_render(slug, scene=None):
+    args = [sys.executable, os.path.join(config.ROOT, "app", "pipeline.py"), "render", slug]
+    if scene:
+        args += ["--scene", str(int(scene))]
+    out = open(os.path.join(config.LOGS_DIR, "render-stdout.log"), "a")
+    kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
+    RENDER.update(slug=slug, proc=subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT, cwd=config.ROOT, **kw))
+
+
 def start_render(slug, scene=None):
     with LOCK:
         busy = running_render()
@@ -152,16 +167,36 @@ def start_render(slug, scene=None):
             raise FactoryError("BUSY", f"Already rendering '{busy}'. Wait for it or cancel it.")
         if any(t["kind"] in ("llm", "voice") and t["state"] == "running" for t in TASKS.values()):
             raise FactoryError("BUSY", "The local AI is still writing. Wait until it has finished.")
-        args = [sys.executable, os.path.join(config.ROOT, "app", "pipeline.py"), "render", slug]
-        if scene:
-            args += ["--scene", str(int(scene))]
-        # fresh state at once, so nobody reads the previous run's "done" while the process starts
-        with open(projects.path(slug, "job.json"), "w") as f:
-            json.dump({"state": "running", "stage": "starting", "pct": 0, "message": "Starting",
-                       "started": time.time(), "updated": time.time(), "warnings": []}, f)
-        out = open(os.path.join(config.LOGS_DIR, "render-stdout.log"), "a")
-        kw = {"creationflags": 0x00000200} if platform.system() == "Windows" else {"start_new_session": True}
-        RENDER.update(slug=slug, proc=subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT, cwd=config.ROOT, **kw))
+        s = apply_settings()
+        if comfy.alive():
+            # fresh state at once, so nobody reads the previous run's "done" while the process starts
+            _write_job(slug, state="running", stage="starting", message="Starting")
+            _spawn_render(slug, scene)
+            return
+        why = services.why_not_startable(s)
+        if why:
+            raise FactoryError("COMFY_DOWN", f"ComfyUI is not running at {s['comfy_url']}. {why}")
+        # ComfyUI is down but can be started here: start it, then render (the GUI shows the wait)
+        _write_job(slug, state="running", stage="comfy", message="Starting ComfyUI first (20-60 s)",
+                   pid=os.getpid())
+        RENDER.update(slug=slug, proc=None)
+
+    def go():
+        ok = services.start_comfy(s, wait=240, say=lambda m: None)
+        with LOCK:
+            j = projects.job(slug)
+            if j.get("state") != "running" or j.get("stage") != "comfy":
+                return                                   # cancelled while ComfyUI was starting
+            if ok:
+                _write_job(slug, state="running", stage="starting", message="Starting")
+                _spawn_render(slug, scene)
+            else:
+                e = FactoryError("COMFY_DOWN", "ComfyUI could not be started: " +
+                                 services.STATE["comfy"].replace("failed: ", ""))
+                entry = errors.record(e, "render", project=slug, stage="comfy")
+                _write_job(slug, state="error", stage="comfy", message=str(e), error=str(e), code=entry["code"],
+                           hint=entry["hint"], ref=entry["ref"])
+    threading.Thread(target=go, daemon=True).start()
 
 
 def cancel_render(slug):
@@ -175,7 +210,7 @@ def cancel_render(slug):
             p.kill()
     else:
         j = projects.job(slug)                 # a render this GUI did not start (restarted GUI, CLI)
-        if j.get("state") == "running" and pid_alive(j.get("pid")):
+        if j.get("state") == "running" and j.get("pid") != os.getpid() and pid_alive(j.get("pid")):
             try:
                 os.kill(int(j["pid"]), 15)
             except OSError as e:
@@ -241,7 +276,8 @@ def status():
     s = config.load_settings()
     comfy.configure(s["comfy_url"])
     llm.configure(s["ollama_url"])
-    return {"comfy": comfy.alive(), "ollama": llm.alive(), "rendering": running_render(),
+    return {"comfy": comfy.alive(), "comfy_state": services.STATE["comfy"], "ollama": llm.alive(),
+            "rendering": running_render(),
             "tasks": busy_tasks()}
 
 
@@ -545,6 +581,16 @@ class Handler(BaseHTTPRequestHandler):
             s = config.save_settings(body)
             apply_settings(s)
             return {"ok": True}
+        if P and p == "/api/comfy/start":
+            s = apply_settings()
+            if comfy.alive():
+                return {"state": "running"}
+            why = services.why_not_startable(s)
+            if why:
+                raise FactoryError("COMFY_DOWN", f"ComfyUI is not running at {s['comfy_url']}. {why}")
+            threading.Thread(target=services.start_comfy, args=(s,), kwargs={"wait": 240, "say": lambda m: None},
+                             daemon=True).start()
+            return {"state": "starting"}
         if G and p == "/api/hardware/detect":
             return config.detect_hardware()
         if G and p == "/api/templates":

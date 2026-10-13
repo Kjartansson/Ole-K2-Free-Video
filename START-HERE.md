@@ -18,7 +18,10 @@ The launcher:
 2. starts Ollama if needed,
 3. opens the web GUI at **http://127.0.0.1:8770** in your browser.
 
-Already running? `./factory.sh` then just opens the browser. To load new code: `./factory.sh restart`
+ComfyUI stopped while the factory is open? Click the red **ComfyUI** dot at the top of the page, or
+just click **Render video**: the factory starts ComfyUI by itself (20-60 s) and then renders.
+
+Already running? `./factory.sh` then just opens the browser (and starts ComfyUI if it is down). To load new code: `./factory.sh restart`
 (renders that are running keep going). `./factory.sh stop` stops it. No `sudo` needed.
 
 Leave the terminal window open while you work. **Ctrl+C** (or closing the window) stops the
